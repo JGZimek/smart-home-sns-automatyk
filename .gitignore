@@ -1,0 +1,22 @@
+# Ignoruj pliki systemowe
+.DS_Store
+Thumbs.db
+
+# --- DOCKER / MOSQUITTO ---
+# Ignoruj dane (bazy danych)
+server/mosquitto/data/
+
+# Ignoruj logi
+server/mosquitto/log/
+
+# WAŻNE: Ignoruj plik z hasłami!
+server/mosquitto/config/passwd
+
+# Ignoruj potencjalne pliki .env (jeśli kiedyś użyjesz)
+.env
+
+# --- ESP32 / ARDUINO / PLATFORMIO ---
+.pio/
+.vscode/
+**/build/
+dist/
