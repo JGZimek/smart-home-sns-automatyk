@@ -6,24 +6,24 @@
 #include <time.h>
 #include "esp_log.h"
 
-// --- LOGGING TAGS ---
-static const char* TAG_MAIN = "MAIN";
+// --- TAGI LOGÓW ---
+static const char* TAG_MAIN = "ENV_SYS";
 static const char* TAG_WIFI = "WIFI";
 static const char* TAG_MQTT = "MQTT";
 static const char* TAG_SENS = "SENS";
 static const char* TAG_TIME = "TIME";
 
-// --- PIN CONFIGURATION ---
+// --- KONFIGURACJA PINÓW ---
 #define PIN_I2C_SDA     21
 #define PIN_I2C_SCL     22
 
-// --- SETTINGS ---
+// --- USTAWIENIA ---
 #define SENSOR_INTERVAL 5000
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3600;      // UTC+1
 const int   daylightOffset_sec = 3600; // UTC+2 (Lato)
 
-// --- GLOBAL OBJECTS ---
+// --- OBIEKTY GLOBALNE ---
 WiFiManager wm;
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -36,7 +36,7 @@ char mqtt_port[6] = "1883";
 const char* mqtt_user = "esp32";
 const char* mqtt_pass = "esp32";
 
-// --- DATA STRUCTURE ---
+// --- STRUKTURY DANYCH ---
 enum SensorType { TEMP, HUM, PRES };
 
 struct SensorMeasurement {
@@ -47,7 +47,7 @@ struct SensorMeasurement {
 
 QueueHandle_t msgQueue;
 
-// --- HELPER FUNCTIONS ---
+// --- FUNKCJE POMOCNICZE ---
 
 // Callback Wi-Fi Managera przy zapisie konfiguracji
 void saveParamsCallback() {
@@ -102,7 +102,7 @@ void reconnectMqtt() {
             client.publish("home/garden/system/status", "ONLINE");
         } else {
             printMqttError(client.state());
-            // Opóźnienie jest robione w pętli taska, tu tylko logujemy
+            // Opóźnienie jest robione w pętli taska, tu tylko logujemy błąd
         }
     }
 }
@@ -134,9 +134,9 @@ void sensorControlTask(void * parameter) {
     ESP_LOGI(TAG_SENS, "Task started on Core 1");
 
     if (!bme.begin(0x76)) {
-        ESP_LOGE(TAG_SENS, "BME280 not found! Check wiring.");
+        ESP_LOGE(TAG_SENS, "BME280 not found! Check wiring (SDA/SCL).");
     } else {
-        ESP_LOGI(TAG_SENS, "BME280 initialized.");
+        ESP_LOGI(TAG_SENS, "BME280 initialized OK.");
     }
     
     for(;;) {
@@ -147,19 +147,23 @@ void sensorControlTask(void * parameter) {
         float hum = bme.readHumidity();
         float pres = bme.readPressure() / 100.0F;
 
-        // Logowanie debugowe (opcjonalne)
-        // ESP_LOGD(TAG_SENS, "Read: T=%.1f H=%.1f P=%.1f", temp, hum, pres);
+        // Logowanie debugowe (opcjonalne - widoczne tylko przy CORE_DEBUG_LEVEL >= 4)
+        ESP_LOGD(TAG_SENS, "Read: T=%.1f H=%.1f P=%.1f", temp, hum, pres);
 
         SensorMeasurement m;
         m.timestamp = now;
 
-        // Wysyłanie do kolejki
+        // Temperatura
         m.type = TEMP; m.value = temp;
-        xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10));
+        if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) {
+             ESP_LOGW(TAG_SENS, "Queue full! Dropping TEMP packet.");
+        }
 
+        // Wilgotność
         m.type = HUM; m.value = hum;
         xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10));
 
+        // Ciśnienie
         m.type = PRES; m.value = pres;
         xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10));
 
@@ -181,7 +185,7 @@ void networkTask(void * parameter) {
     for(;;) {
         // 1. WiFi Check
         if (WiFi.status() != WL_CONNECTED) {
-             // Logowanie handled by WiFiEvent
+             // Logowanie jest w WiFiEvent, tutaj tylko czekamy
              vTaskDelay(pdMS_TO_TICKS(2000));
              continue;
         }
@@ -210,7 +214,7 @@ void networkTask(void * parameter) {
             if (client.publish(topicBuffer, payloadBuffer)) {
                 ESP_LOGI(TAG_MQTT, "Sent %s: %.2f", topicBuffer, inMsg.value);
             } else {
-                ESP_LOGE(TAG_MQTT, "Publish failed!");
+                ESP_LOGE(TAG_MQTT, "Publish failed! (Client busy or disconn?)");
             }
         }
 
@@ -228,7 +232,7 @@ void setup() {
     esp_log_level_set("*", ESP_LOG_INFO); 
     
     delay(1000);
-    ESP_LOGI(TAG_MAIN, "System Startup");
+    ESP_LOGI(TAG_MAIN, "System Startup - Environment System");
 
     // 1. Load Config
     preferences.begin("smarthome", true);
@@ -249,7 +253,7 @@ void setup() {
     wm.addParameter(&custom_mqtt_ip);
     wm.setSaveParamsCallback(saveParamsCallback);
     
-    // wm.resetSettings(); // Uncomment for reset
+    // wm.resetSettings(); // Włącz to RAZ, jeśli chcesz wyczyścić zapisane WiFi, potem zakomentuj
     
     if(!wm.autoConnect("SmartHome-Env")) {
         ESP_LOGE(TAG_WIFI, "Failed to connect. Restarting...");
@@ -262,7 +266,8 @@ void setup() {
     // 4. Create Queue
     msgQueue = xQueueCreate(20, sizeof(SensorMeasurement));
     if (msgQueue == NULL) {
-        ESP_LOGE(TAG_MAIN, "Failed to create queue!");
+        ESP_LOGE(TAG_MAIN, "Failed to create queue! Halt.");
+        while(1); // Stop if no memory
     }
 
     // 5. Start Tasks
