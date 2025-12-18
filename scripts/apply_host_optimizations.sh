@@ -74,9 +74,9 @@ fi
 SYSTEM_CONF="/etc/systemd/system.conf"
 echo "[3/3] Konfiguracja Systemd RuntimeWatchdog..."
 
-# Odkomentowanie i ustawienie RuntimeWatchdogSec (jeśli jest zakomentowane)
-if grep -q "#RuntimeWatchdogSec=" "$SYSTEM_CONF"; then
-    sed -i 's/^#RuntimeWatchdogSec=.*$/RuntimeWatchdogSec=15/' "$SYSTEM_CONF"
+# Odkomentowanie i ustawienie RuntimeWatchdogSec (jeśli jest zakomentowane z domyślną, pustą wartością)
+if grep -q '^#RuntimeWatchdogSec=[[:space:]]*$' "$SYSTEM_CONF"; then
+    sed -i 's/^#RuntimeWatchdogSec=[[:space:]]*$/RuntimeWatchdogSec=15/' "$SYSTEM_CONF"
     echo "   -> Watchdog ustawiony na 15s."
 elif grep -q "RuntimeWatchdogSec=15" "$SYSTEM_CONF"; then
     echo "   -> Watchdog już jest skonfigurowany."
