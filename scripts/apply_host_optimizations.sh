@@ -114,9 +114,9 @@ elif grep -q "RuntimeWatchdogSec=15" "$SYSTEM_CONF"; then
     echo "   -> Watchdog is already configured correctly."
 else
     if grep -q "RuntimeWatchdogSec=" "$SYSTEM_CONF"; then
-         echo "   -> Watchdog is set to a non-default value. Skipping modification."
+        echo "   -> Watchdog is set to a non-default value. Skipping modification."
     else
-         echo "Warning: Standard RuntimeWatchdogSec line not found in $SYSTEM_CONF. Please check manually."
+        echo "Warning: Standard RuntimeWatchdogSec line not found in $SYSTEM_CONF. Please check manually."
     fi
 fi
 
