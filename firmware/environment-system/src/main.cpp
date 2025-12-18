@@ -39,8 +39,10 @@ Adafruit_BME280 bme;
 Adafruit_INA219 pwr1(INA1_ADDR);
 Adafruit_INA219 pwr2(INA2_ADDR);
 
-volatile bool pwr1_connected = false;
-volatile bool pwr2_connected = false;
+// Flagi statusu czujników
+bool bme_connected = false;
+bool pwr1_connected = false;
+bool pwr2_connected = false;
 
 // --- MQTT CONFIG ---
 char mqtt_server[40] = "192.168.1.57";
@@ -143,15 +145,19 @@ void sensorControlTask(void * parameter) {
     // Init BME280
     if (!bme.begin(0x76, &Wire)) {
         ESP_LOGE(TAG_SENS, "BME280 not found!");
+        bme_connected = false;
     } else {
         ESP_LOGI(TAG_SENS, "BME280 initialized OK.");
+        bme_connected = true;
     }
 
     // Init Watomierz 1 (Solar)
     if (!pwr1.begin(&Wire)) {
         ESP_LOGE(TAG_PWR, "INA219 #1 (Addr 0x%X) Not Found", INA1_ADDR);
+        pwr1_connected = false;
     } else {
         pwr1_connected = true;
+        // Solar panels can have higher voltage, keeping 32V range is safer.
         pwr1.setCalibration_32V_2A(); 
         ESP_LOGI(TAG_PWR, "INA219 #1 (Solar) Connected");
     }
@@ -159,8 +165,10 @@ void sensorControlTask(void * parameter) {
     // Init Watomierz 2 (Battery)
     if (!pwr2.begin(&Wire)) {
         ESP_LOGE(TAG_PWR, "INA219 #2 (Addr 0x%X) Not Found", INA2_ADDR);
+        pwr2_connected = false;
     } else {
         pwr2_connected = true;
+        // Standard battery monitoring. If measuring low currents (<1A), consider changing to setCalibration_32V_1A() for better precision.
         pwr2.setCalibration_32V_2A(); 
         ESP_LOGI(TAG_PWR, "INA219 #2 (Battery) Connected");
     }
@@ -169,26 +177,30 @@ void sensorControlTask(void * parameter) {
         time_t now;
         time(&now); 
 
-        // 1. Odczyt BME280
-        float temp = bme.readTemperature();
-        float hum = bme.readHumidity();
-        float pres = bme.readPressure() / 100.0F;
+        // 1. Odczyt BME280 (tylko jeśli podłączony)
+        if (bme_connected) {
+            float temp = bme.readTemperature();
+            float hum = bme.readHumidity();
+            float pres = bme.readPressure() / 100.0F;
 
-        SensorMeasurement m;
-        m.timestamp = now;
-        m.sourceId = 0; // ID 0 = Środowisko
+            SensorMeasurement m;
+            m.timestamp = now;
+            m.sourceId = 0; // ID 0 = Środowisko
 
-        m.type = TEMP; m.value = temp;
-        if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env TEMP");
-        
-        m.type = HUM; m.value = hum; 
-        if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env HUM");
+            m.type = TEMP; m.value = temp;
+            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env TEMP");
+            
+            m.type = HUM; m.value = hum; 
+            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env HUM");
 
-        m.type = PRES; m.value = pres; 
-        if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env PRES");
+            m.type = PRES; m.value = pres; 
+            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env PRES");
+        }
 
         // 2. Odczyt Watomierza 1 (Solar)
         if (pwr1_connected) {
+            SensorMeasurement m;
+            m.timestamp = now;
             m.sourceId = 1;
             
             m.type = VOLT; m.value = pwr1.getBusVoltage_V(); 
@@ -203,6 +215,8 @@ void sensorControlTask(void * parameter) {
 
         // 3. Odczyt Watomierza 2 (Battery)
         if (pwr2_connected) {
+            SensorMeasurement m;
+            m.timestamp = now;
             m.sourceId = 2;
             
             m.type = VOLT; m.value = pwr2.getBusVoltage_V(); 
@@ -259,8 +273,11 @@ void networkTask(void * parameter) {
             } else {
                 // Dane zasilania (INA219)
                 const char* sourceName = "unknown";
-                if (inMsg.sourceId == 1) sourceName = "solar";    // ID 1 -> solar
-                else if (inMsg.sourceId == 2) sourceName = "battery"; // ID 2 -> battery
+                if (inMsg.sourceId == 1) {
+                    sourceName = "solar";
+                } else if (inMsg.sourceId == 2) {
+                    sourceName = "battery";
+                }
 
                 const char* metric = "unknown";
                 bool validMetric = true;
@@ -273,12 +290,13 @@ void networkTask(void * parameter) {
                         validMetric = false;
                         break;
                 }
-                if (!validMetric) {
-                    // Skip publishing for unsupported metric types to avoid invalid MQTT topics
-                    continue;
+                
+                if (validMetric) {
+                    // Format: home/garden/power/solar/voltage
+                    snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
+                } else {
+                    snprintf(topicBuffer, 64, "home/garden/power/%s/error", sourceName);
                 }
-                // Format: home/garden/power/solar/voltage
-                snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
             }
 
             snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
@@ -323,7 +341,8 @@ void setup() {
     
     initTime();
 
-    msgQueue = xQueueCreate(40, sizeof(SensorMeasurement));
+    // Zwiększono kolejkę do 60, aby pomieścić ~35s danych (9 pomiarów co 5s = 1.8 msg/s) w przypadku awarii sieci.
+    msgQueue = xQueueCreate(60, sizeof(SensorMeasurement));
     if (msgQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
         while(1); 
