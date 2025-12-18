@@ -20,11 +20,8 @@ static const char* TAG_TIME = "TIME";
 #define PIN_I2C_SCL     22
 
 // --- ADRESY I2C ---
-// Uwaga: Domyślny adres INA219 to 0x40. Moduły zostały skonfigurowane sprzętowo
-// (piny/jumpery adresowe A0/A1 na płytkach INA219) tak, aby używać poniższych adresów.
-// Upewnij się, że ustawienia zworek A0/A1 na obu modułach odpowiadają tym adresom.
-#define INA1_ADDR       0x45 // Watomierz 1 (Solar)  - INA219 na adresie 0x45
-#define INA2_ADDR       0x44 // Watomierz 2 (Bateria) - INA219 na adresie 0x44
+#define INA1_ADDR       0x45 // Watomierz 1 (Solar)
+#define INA2_ADDR       0x44 // Watomierz 2 (Bateria)
 
 // --- USTAWIENIA ---
 #define SENSOR_INTERVAL 5000
@@ -160,7 +157,6 @@ void sensorControlTask(void * parameter) {
         pwr1_connected = false;
     } else {
         pwr1_connected = true;
-        // Solar panels can have higher voltage, keeping 32V range is safer.
         pwr1.setCalibration_32V_2A(); 
         ESP_LOGI(TAG_PWR, "INA219 #1 (Solar) Connected");
     }
@@ -171,7 +167,6 @@ void sensorControlTask(void * parameter) {
         pwr2_connected = false;
     } else {
         pwr2_connected = true;
-        // Standard battery monitoring. If measuring low currents (<1A), consider changing to setCalibration_32V_1A() for better precision.
         pwr2.setCalibration_32V_2A(); 
         ESP_LOGI(TAG_PWR, "INA219 #2 (Battery) Connected");
     }
@@ -180,7 +175,7 @@ void sensorControlTask(void * parameter) {
         time_t now;
         time(&now); 
 
-        // 1. Odczyt BME280 (tylko jeśli podłączony)
+        // 1. Odczyt BME280
         if (bme_connected) {
             float temp = bme.readTemperature();
             float hum = bme.readHumidity();
@@ -212,7 +207,8 @@ void sensorControlTask(void * parameter) {
             m.type = CURR; m.value = pwr1.getCurrent_mA(); 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar CURR");
 
-            m.type = WATT; m.value = pwr1.getPower_mW(); 
+            // Konwersja mW -> W dla czytelności (zgodnie z uwagą)
+            m.type = WATT; m.value = pwr1.getPower_mW() / 1000.0f; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar WATT");
         }
 
@@ -228,7 +224,8 @@ void sensorControlTask(void * parameter) {
             m.type = CURR; m.value = pwr2.getCurrent_mA(); 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt CURR");
 
-            m.type = WATT; m.value = pwr2.getPower_mW(); 
+            // Konwersja mW -> W dla czytelności (zgodnie z uwagą)
+            m.type = WATT; m.value = pwr2.getPower_mW() / 1000.0f; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt WATT");
         }
 
@@ -287,9 +284,9 @@ void networkTask(void * parameter) {
                 switch(inMsg.type) {
                     case VOLT: metric = "voltage"; break;
                     case CURR: metric = "current"; break;
-                    case WATT: metric = "power"; break;
+                    case WATT: metric = "power"; break; // Wartość jest już w Watach
                     default:
-                        ESP_LOGE(TAG_PWR, "Unsupported power sensor type: %d (sourceId=%d)", inMsg.type, inMsg.sourceId);
+                        ESP_LOGE(TAG_PWR, "Unsupported type: %d (sourceId=%d)", inMsg.type, inMsg.sourceId);
                         validMetric = false;
                         break;
                 }
@@ -302,12 +299,17 @@ void networkTask(void * parameter) {
                 }
             }
 
-            snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
+            // Precyzja: 4 miejsca po przecinku dla Watów, 2 dla reszty (opcjonalnie)
+            if (inMsg.type == WATT) {
+                snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
+            } else {
+                snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
+            }
 
             if (client.publish(topicBuffer, payloadBuffer)) {
                 // Loguj tylko wybrane, żeby nie śmiecić
                 if (inMsg.type == TEMP || inMsg.type == WATT) {
-                    ESP_LOGI(TAG_MQTT, "Sent %s: %.2f", topicBuffer, inMsg.value);
+                    ESP_LOGI(TAG_MQTT, "Sent %s: %.4f", topicBuffer, inMsg.value);
                 }
             } else {
                 ESP_LOGE(TAG_MQTT, "Publish failed!");
@@ -344,7 +346,7 @@ void setup() {
     
     initTime();
 
-    // Zwiększono kolejkę do 60, aby pomieścić ~33s danych (9 pomiarów co 5s = 1.8 msg/s) w przypadku awarii sieci.
+    // Zwiększono kolejkę do 60
     msgQueue = xQueueCreate(60, sizeof(SensorMeasurement));
     if (msgQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
