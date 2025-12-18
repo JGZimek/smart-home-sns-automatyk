@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <Adafruit_BME280.h>
 #include <Adafruit_INA219.h>
+#include <Adafruit_TSL2591.h>
 #include <time.h>
 #include "esp_log.h"
 
@@ -22,6 +23,7 @@ static const char* TAG_TIME = "TIME";
 // --- I2C ADDRESSES ---
 #define INA1_ADDR       0x45 // Wattmeter 1 (Solar)
 #define INA2_ADDR       0x44 // Wattmeter 2 (Battery)
+// TSL2591 default address is 0x29 (Fixed)
 
 // --- SETTINGS ---
 #define SENSOR_INTERVAL 5000
@@ -34,15 +36,18 @@ WiFiManager wm;
 WiFiClient espClient;
 PubSubClient client(espClient);
 Preferences preferences;
-Adafruit_BME280 bme;
 
+// Sensors
+Adafruit_BME280 bme;
 Adafruit_INA219 pwr1(INA1_ADDR);
 Adafruit_INA219 pwr2(INA2_ADDR);
+Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
 
 // Sensor status flags
 bool bme_connected = false;
 bool pwr1_connected = false;
 bool pwr2_connected = false;
+bool tsl_connected = false;
 
 // --- MQTT CONFIG ---
 char mqtt_server[40] = "192.168.1.57";
@@ -51,11 +56,11 @@ const char* mqtt_user = "esp32";
 const char* mqtt_pass = "esp32";
 
 // --- DATA STRUCTURES ---
-enum SensorType { TEMP, HUM, PRES, VOLT, CURR, WATT };
+enum SensorType { TEMP, HUM, PRES, VOLT, CURR, WATT, LIGHT };
 
 struct SensorMeasurement {
     SensorType type;
-    uint8_t sourceId; // 0=BME, 1=Solar, 2=Battery
+    uint8_t sourceId; // 0=Env(BME/TSL), 1=Solar, 2=Battery
     float value;
     time_t timestamp;
 };
@@ -134,20 +139,31 @@ void initTime() {
     }
 }
 
+void configureTSL() {
+    // MEDIUM Gain (25x) - Good balance for indoor/outdoor
+    tsl.setGain(TSL2591_GAIN_MED);
+    // 100ms integration time - Fast enough response
+    tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);
+}
+
 // ---------------------------------------------------------
 // TASK 1: SENSOR & CONTROL (Core 1)
 // ---------------------------------------------------------
 void sensorControlTask(void * parameter) {
     ESP_LOGI(TAG_SENS, "Task started on Core 1");
 
-    // Initialize I2C Bus
-    if(!Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL)) {
-        ESP_LOGE(TAG_SENS, "I2C Bus Init Failed!");
-    } else {
-        ESP_LOGI(TAG_SENS, "I2C Bus Init OK");
+    if (!Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL)) {
+        ESP_LOGE(TAG_SENS, "Failed to initialize I2C bus on SDA=%d, SCL=%d", PIN_I2C_SDA, PIN_I2C_SCL);
+        // Without a working I2C bus, sensor initialization cannot proceed safely.
+        bme_connected  = false;
+        tsl_connected  = false;
+        pwr1_connected = false;
+        pwr2_connected = false;
+        return;
     }
+    ESP_LOGI(TAG_SENS, "I2C bus initialized on SDA=%d, SCL=%d", PIN_I2C_SDA, PIN_I2C_SCL);
 
-    // Init BME280
+    // 1. Init BME280
     if (!bme.begin(0x76, &Wire)) {
         ESP_LOGE(TAG_SENS, "BME280 not found!");
         bme_connected = false;
@@ -156,24 +172,32 @@ void sensorControlTask(void * parameter) {
         bme_connected = true;
     }
 
-    // Init Wattmeter 1 (Solar)
+    // 2. Init TSL2591 [NEW]
+    if (!tsl.begin(&Wire)) {
+        ESP_LOGE(TAG_SENS, "TSL2591 Not Found!");
+        tsl_connected = false;
+    } else {
+        ESP_LOGI(TAG_SENS, "TSL2591 initialized OK.");
+        tsl_connected = true;
+        configureTSL();
+    }
+
+    // 3. Init Wattmeter 1 (Solar)
     if (!pwr1.begin(&Wire)) {
         ESP_LOGE(TAG_PWR, "INA219 #1 (Addr 0x%X) Not Found", INA1_ADDR);
         pwr1_connected = false;
     } else {
-        // NOTE: 32V_2A range assumes max 2A current. Ensure solar panel output does not exceed this.
         pwr1.setCalibration_32V_2A(); 
         pwr1_connected = true;
         ESP_LOGI(TAG_PWR, "INA219 #1 (Solar) Connected");
     }
 
-    // Init Wattmeter 2 (Battery)
+    // 4. Init Wattmeter 2 (Battery)
     if (!pwr2.begin(&Wire)) {
         ESP_LOGE(TAG_PWR, "INA219 #2 (Addr 0x%X) Not Found", INA2_ADDR);
         pwr2_connected = false;
     } else {
-        // NOTE: Using 32V_1A range for improved precision with low-current battery monitoring (<1A).
-        pwr2.setCalibration_32V_1A(); 
+        pwr2.setCalibration_32V_2A(); 
         pwr2_connected = true;
         ESP_LOGI(TAG_PWR, "INA219 #2 (Battery) Connected");
     }
@@ -182,13 +206,12 @@ void sensorControlTask(void * parameter) {
         time_t now;
         time(&now); 
 
-        // 1. Read BME280 (only if connected)
+        // --- BME280 Readings ---
         if (bme_connected) {
             float temp = bme.readTemperature();
             float hum = bme.readHumidity();
             float pres = bme.readPressure() / 100.0F;
 
-            // Validate readings (check for NaN)
             if (isnan(temp) || isnan(hum) || isnan(pres)) {
                 ESP_LOGW(TAG_SENS, "Invalid BME280 reading (NaN). Skipping.");
             } else {
@@ -207,13 +230,38 @@ void sensorControlTask(void * parameter) {
             }
         }
 
-        // 2. Read Wattmeter 1 (Solar)
+        // --- TSL2591 Readings [NEW] ---
+        if (tsl_connected) {
+            // Read 32-bit luminosity data
+            uint32_t lum = tsl.getFullLuminosity();
+            uint16_t ir, full;
+            ir = lum >> 16;
+            full = lum & 0xFFFF;
+
+            // Check for saturation (sensor blinded) before calculating lux
+            if (full == 0xFFFF) {
+                ESP_LOGW(TAG_SENS, "TSL2591 Saturated! (Too bright)");
+            } else {
+                // Calculate Lux only when not saturated
+                float lux = tsl.calculateLux(full, ir);
+
+                if (!isnan(lux)) {
+                    SensorMeasurement m;
+                    m.timestamp = now;
+                    m.sourceId = 0; // Environment group
+                    m.type = LIGHT; 
+                    m.value = lux;
+                    if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env LIGHT");
+                }
+            }
+        }
+
+        // --- Wattmeter 1 (Solar) ---
         if (pwr1_connected) {
             float v = pwr1.getBusVoltage_V();
             float c_mA = pwr1.getCurrent_mA();
             float w_mW = pwr1.getPower_mW();
 
-            // Validate readings
             if (isnan(v) || isnan(c_mA) || isnan(w_mW)) {
                 ESP_LOGW(TAG_PWR, "Invalid INA219 #1 (Solar) reading. Skipping.");
             } else {
@@ -224,23 +272,20 @@ void sensorControlTask(void * parameter) {
                 m.type = VOLT; m.value = v; 
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar VOLT");
 
-                // Convert mA to A for consistency
-                m.type = CURR; m.value = c_mA / 1000.0f; 
+                m.type = CURR; m.value = c_mA / 1000.0f; // mA -> A
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar CURR");
 
-                // Convert mW to W for readability
-                m.type = WATT; m.value = w_mW / 1000.0f; 
+                m.type = WATT; m.value = w_mW / 1000.0f; // mW -> W
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar WATT");
             }
         }
 
-        // 3. Read Wattmeter 2 (Battery)
+        // --- Wattmeter 2 (Battery) ---
         if (pwr2_connected) {
             float v = pwr2.getBusVoltage_V();
             float c_mA = pwr2.getCurrent_mA();
             float w_mW = pwr2.getPower_mW();
 
-            // Validate readings
             if (isnan(v) || isnan(c_mA) || isnan(w_mW)) {
                 ESP_LOGW(TAG_PWR, "Invalid INA219 #2 (Battery) reading. Skipping.");
             } else {
@@ -251,12 +296,10 @@ void sensorControlTask(void * parameter) {
                 m.type = VOLT; m.value = v; 
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt VOLT");
 
-                // Convert mA to A for consistency
-                m.type = CURR; m.value = c_mA / 1000.0f; 
+                m.type = CURR; m.value = c_mA / 1000.0f; // mA -> A
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt CURR");
 
-                // Convert mW to W for readability
-                m.type = WATT; m.value = w_mW / 1000.0f; 
+                m.type = WATT; m.value = w_mW / 1000.0f; // mW -> W
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt WATT");
             }
         }
@@ -295,21 +338,19 @@ void networkTask(void * parameter) {
             
             // --- TOPIC GENERATION ---
             if (inMsg.sourceId == 0) {
-                // Environmental data (BME280)
+                // Environmental data
                 switch(inMsg.type) {
                     case TEMP: snprintf(topicBuffer, 64, "home/garden/environment/temperature"); break;
                     case HUM:  snprintf(topicBuffer, 64, "home/garden/environment/humidity"); break;
                     case PRES: snprintf(topicBuffer, 64, "home/garden/environment/pressure"); break;
+                    case LIGHT: snprintf(topicBuffer, 64, "home/garden/environment/light"); break;
                     default:   snprintf(topicBuffer, 64, "home/garden/environment/log"); break;
                 }
             } else {
                 // Power data (INA219)
                 const char* sourceName = "unknown";
-                if (inMsg.sourceId == 1) {
-                    sourceName = "solar";
-                } else if (inMsg.sourceId == 2) {
-                    sourceName = "battery";
-                }
+                if (inMsg.sourceId == 1) sourceName = "solar";
+                else if (inMsg.sourceId == 2) sourceName = "battery";
 
                 const char* metric = "unknown";
                 bool validMetric = true;
@@ -318,34 +359,31 @@ void networkTask(void * parameter) {
                     case CURR: metric = "current"; break;
                     case WATT: metric = "power"; break;
                     default:
-                        ESP_LOGE(TAG_PWR, "Unsupported type: %d (sourceId=%d)", inMsg.type, inMsg.sourceId);
+                        ESP_LOGE(TAG_PWR, "Unsupported type: %d", inMsg.type);
                         validMetric = false;
                         break;
                 }
                 
                 if (validMetric) {
-                    // Format: home/garden/power/solar/voltage
-                    snprintf(topicBuffer, sizeof(topicBuffer), "home/garden/power/%s/%s", sourceName, metric);
+                    snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
                 } else {
-                    snprintf(topicBuffer, sizeof(topicBuffer), "home/garden/power/%s/error", sourceName);
+                    snprintf(topicBuffer, 64, "home/garden/power/%s/error", sourceName);
                 }
             }
 
-            // Precision: 4 decimal places for Watts and current, 2 for others
-            if (inMsg.type == WATT || inMsg.type == CURR) {
+            // Payload formatting
+            if (inMsg.type == WATT || inMsg.type == CURR || inMsg.type == LIGHT) {
                 snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
             } else {
                 snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
             }
 
             if (client.publish(topicBuffer, payloadBuffer)) {
-                // Log only selected values to reduce noise
-                if (inMsg.type == TEMP || inMsg.type == WATT) {
-                    if (inMsg.type == WATT) {
-                        ESP_LOGI(TAG_MQTT, "Sent %s: %.4f", topicBuffer, inMsg.value);
-                    } else {
-                        ESP_LOGI(TAG_MQTT, "Sent %s: %.2f", topicBuffer, inMsg.value);
-                    }
+                // Log select values
+                if (inMsg.type == LIGHT) {
+                    ESP_LOGI(TAG_MQTT, "Sent Light: %.4f Lux", inMsg.value);
+                } else if (inMsg.type == WATT) {
+                    ESP_LOGI(TAG_MQTT, "Sent Power: %.4f W", inMsg.value);
                 }
             } else {
                 ESP_LOGE(TAG_MQTT, "Publish failed!");
@@ -382,14 +420,13 @@ void setup() {
     
     initTime();
 
-    // Queue size increased to 100 to provide approx 55s buffer during network outages
+    // Queue size increased to 100
     msgQueue = xQueueCreate(100, sizeof(SensorMeasurement));
     if (msgQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
         while(1); 
     }
 
-    // Increased stack size for sensor task to handle I2C ops and validations safely
     xTaskCreatePinnedToCore(networkTask, "NetTask", 8192, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(sensorControlTask, "SensTask", 6144, NULL, 1, NULL, 1);
 }
