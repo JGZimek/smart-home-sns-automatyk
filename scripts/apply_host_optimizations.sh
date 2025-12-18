@@ -91,9 +91,13 @@ fi
 SYSTEM_CONF="/etc/systemd/system.conf"
 echo "[3/3] Configuring Systemd RuntimeWatchdog..."
 
-# CREATE BACKUP
-cp "$SYSTEM_CONF" "${SYSTEM_CONF}.bak"
-echo "   -> Backup created at ${SYSTEM_CONF}.bak"
+# CREATE BACKUP (do not overwrite existing original backup)
+if [ ! -f "${SYSTEM_CONF}.bak" ]; then
+    cp "$SYSTEM_CONF" "${SYSTEM_CONF}.bak"
+    echo "   -> Backup created at ${SYSTEM_CONF}.bak"
+else
+    echo "   -> Backup already exists at ${SYSTEM_CONF}.bak (not overwritten)"
+fi
 
 if grep -q '^#RuntimeWatchdogSec=[[:space:]]*$' "$SYSTEM_CONF"; then
     sed -i 's/^#RuntimeWatchdogSec=[[:space:]]*$/RuntimeWatchdogSec=15/' "$SYSTEM_CONF"
