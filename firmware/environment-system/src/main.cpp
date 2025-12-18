@@ -381,7 +381,7 @@ void networkTask(void * parameter) {
             if (client.publish(topicBuffer, payloadBuffer)) {
                 // Log select values
                 if (inMsg.type == LIGHT) {
-                    ESP_LOGI(TAG_MQTT, "Sent Light: %.1f Lux", inMsg.value);
+                    ESP_LOGI(TAG_MQTT, "Sent Light: %.4f Lux", inMsg.value);
                 } else if (inMsg.type == WATT) {
                     ESP_LOGI(TAG_MQTT, "Sent Power: %.4f W", inMsg.value);
                 }
