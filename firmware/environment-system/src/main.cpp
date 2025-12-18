@@ -318,8 +318,11 @@ void networkTask(void * parameter) {
                 }
             }
 
-            // Precision: 4 decimal places for Watts, 2 for others (optional)
+            // Precision: 4 decimal places for Watts and current (for better low-current resolution),
+            // 2 decimal places for other measurements.
             if (inMsg.type == WATT) {
+                snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
+            } else if (inMsg.type == CURR) {
                 snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
             } else {
                 snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
