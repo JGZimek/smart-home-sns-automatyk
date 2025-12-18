@@ -152,7 +152,16 @@ void configureTSL() {
 void sensorControlTask(void * parameter) {
     ESP_LOGI(TAG_SENS, "Task started on Core 1");
 
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    if (!Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL)) {
+        ESP_LOGE(TAG_SENS, "Failed to initialize I2C bus on SDA=%d, SCL=%d", PIN_I2C_SDA, PIN_I2C_SCL);
+        // Without a working I2C bus, sensor initialization cannot proceed safely.
+        bme_connected  = false;
+        tsl_connected  = false;
+        pwr1_connected = false;
+        pwr2_connected = false;
+        return;
+    }
+    ESP_LOGI(TAG_SENS, "I2C bus initialized on SDA=%d, SCL=%d", PIN_I2C_SDA, PIN_I2C_SCL);
 
     // 1. Init BME280
     if (!bme.begin(0x76, &Wire)) {
