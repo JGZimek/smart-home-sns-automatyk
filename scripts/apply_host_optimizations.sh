@@ -49,16 +49,22 @@ echo "   -> Status: $CURRENT_PM"
 SWAP_CONF="/etc/dphys-swapfile"
 echo "[2/3] Zwiększanie SWAP do 1024MB..."
 
-if grep -q "CONF_SWAPSIZE=100" "$SWAP_CONF"; then
-    # Zmiana 100 na 1024
-    sed -i 's/^CONF_SWAPSIZE=100$/CONF_SWAPSIZE=1024/' "$SWAP_CONF"
-    
-    # Zastosowanie zmian
-    dphys-swapfile setup
-    dphys-swapfile swapon
-    echo "   -> Swap zwiększony pomyślnie."
+if ! command -v dphys-swapfile >/dev/null 2>&1; then
+    echo "   -> Polecenie 'dphys-swapfile' nie jest dostępne. Pomijam zmianę SWAP. Zainstaluj pakiet 'dphys-swapfile', aby włączyć tę optymalizację."
+elif [ ! -f "$SWAP_CONF" ]; then
+    echo "   -> Plik konfiguracyjny $SWAP_CONF nie istnieje. Pomijam zmianę SWAP."
 else
-    echo "   -> Wygląda na to, że Swap jest już zmieniony lub plik konfiguracyjny jest inny."
+    if grep -q "CONF_SWAPSIZE=100" "$SWAP_CONF"; then
+        # Zmiana 100 na 1024
+        sed -i 's/^CONF_SWAPSIZE=100$/CONF_SWAPSIZE=1024/' "$SWAP_CONF"
+        
+        # Zastosowanie zmian
+        dphys-swapfile setup
+        dphys-swapfile swapon
+        echo "   -> Swap zwiększony pomyślnie."
+    else
+        echo "   -> Wygląda na to, że Swap jest już zmieniony lub plik konfiguracyjny jest inny."
+    fi
 fi
 
 
