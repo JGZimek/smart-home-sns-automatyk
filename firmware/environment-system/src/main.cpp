@@ -261,7 +261,7 @@ void networkTask(void * parameter) {
 
         if (xQueueReceive(msgQueue, &inMsg, pdMS_TO_TICKS(10)) == pdTRUE) {
             
-            // --- TWORZENIE TEMATÓW ---
+            // --- TOPIC GENERATION ---
             if (inMsg.sourceId == 0) {
                 // Dane środowiskowe (BME280)
                 switch(inMsg.type) {
