@@ -39,8 +39,8 @@ Adafruit_BME280 bme;
 Adafruit_INA219 pwr1(INA1_ADDR);
 Adafruit_INA219 pwr2(INA2_ADDR);
 
-bool pwr1_connected = false;
-bool pwr2_connected = false;
+volatile bool pwr1_connected = false;
+volatile bool pwr2_connected = false;
 
 // --- MQTT CONFIG ---
 char mqtt_server[40] = "192.168.1.57";
