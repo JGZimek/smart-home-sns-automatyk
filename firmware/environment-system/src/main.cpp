@@ -239,7 +239,8 @@ void sensorControlTask(void * parameter) {
             m.type = VOLT; m.value = v; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt VOLT");
 
-            m.type = CURR; m.value = c; 
+            // Convert mA to A for consistency with V and W
+            m.type = CURR; m.value = c / 1000.0f;
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt CURR");
 
             // Convert mW to W for readability
