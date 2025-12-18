@@ -299,7 +299,7 @@ void networkTask(void * parameter) {
                 }
             }
 
-            // Precyzja: 4 miejsca po przecinku dla Watów, 2 dla reszty (opcjonalnie)
+            // Precision: 4 decimal places for Watts, 2 for others (optional)
             if (inMsg.type == WATT) {
                 snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
             } else {
