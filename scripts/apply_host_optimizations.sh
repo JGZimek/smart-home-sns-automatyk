@@ -9,9 +9,6 @@ fi
 echo "=== Rozpoczynam optymalizację Raspberry Pi Zero 2 W dla SmartHome ==="
 
 # --- 1. WYŁĄCZENIE OSZCZĘDZANIA ENERGII WIFI (Power Management) ---
-# Tworzymy usługę systemd, która przy każdym starcie wyłączy oszczędzanie energii.
-# Jest to pewniejsze niż rc.local.
-
 SERVICE_FILE="/etc/systemd/system/wifi-power-off.service"
 
 echo "[1/3] Konfiguracja WiFi Power Management..."
@@ -29,7 +26,6 @@ ExecStart=/sbin/iwconfig wlan0 power off
 WantedBy=multi-user.target
 EOF
 
-# Przeładowanie systemd i włączenie usługi
 systemctl daemon-reload
 systemctl enable wifi-power-off.service
 systemctl start wifi-power-off.service
@@ -44,46 +40,50 @@ echo "   -> Status: $CURRENT_PM"
 
 
 # --- 2. ZWIĘKSZENIE PLIKU WYMIANY (SWAP) ---
-# Zwiększenie z domyślnych 100MB na 1024MB, aby Docker nie zabijał procesów.
-
 SWAP_CONF="/etc/dphys-swapfile"
 echo "[2/3] Zwiększanie SWAP do 1024MB..."
 
 if ! command -v dphys-swapfile >/dev/null 2>&1; then
-    echo "   -> Polecenie 'dphys-swapfile' nie jest dostępne. Pomijam zmianę SWAP. Zainstaluj pakiet 'dphys-swapfile', aby włączyć tę optymalizację."
+    echo "   -> Polecenie 'dphys-swapfile' nie jest dostępne. Pomijam zmianę SWAP. Zainstaluj pakiet 'dphys-swapfile' (sudo apt install dphys-swapfile)."
 elif [ ! -f "$SWAP_CONF" ]; then
-    echo "   -> Plik konfiguracyjny $SWAP_CONF nie istnieje. Pomijam zmianę SWAP."
+    echo "   -> Plik konfiguracyjny $SWAP_CONF nie istnieje. Tworzę nowy..."
+    echo "CONF_SWAPSIZE=1024" > "$SWAP_CONF"
+    dphys-swapfile setup
+    dphys-swapfile swapon
+    echo "   -> Swap ustawiony na 1024MB."
 else
-    if grep -q "CONF_SWAPSIZE=100" "$SWAP_CONF"; then
-        # Zmiana 100 na 1024
-        sed -i 's/^CONF_SWAPSIZE=100$/CONF_SWAPSIZE=1024/' "$SWAP_CONF"
-        
-        # Zastosowanie zmian
-        dphys-swapfile setup
-        dphys-swapfile swapon
-        echo "   -> Swap zwiększony pomyślnie."
+    # Logika uniwersalna: szuka CONF_SWAPSIZE (zakomentowanego lub nie) i wymusza 1024
+    if grep -qE "^#?CONF_SWAPSIZE=" "$SWAP_CONF"; then
+        sed -i -E 's/^#?CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' "$SWAP_CONF"
+        echo "   -> Zaktualizowano konfigurację w pliku."
     else
-        echo "   -> Wygląda na to, że Swap jest już zmieniony lub plik konfiguracyjny jest inny."
+        echo "CONF_SWAPSIZE=1024" >> "$SWAP_CONF"
+        echo "   -> Dodano konfigurację do pliku."
     fi
+    
+    # Zastosowanie zmian
+    dphys-swapfile setup
+    dphys-swapfile swapon
+    echo "   -> Restart usługi swap wykonany."
 fi
 
 
 # --- 3. AKTYWACJA WATCHDOG ---
-# Restartuje system, jeśli zawiesi się na dłużej niż 15 sekund.
-
 SYSTEM_CONF="/etc/systemd/system.conf"
 echo "[3/3] Konfiguracja Systemd RuntimeWatchdog..."
 
-# Odkomentowanie i ustawienie RuntimeWatchdogSec (jeśli jest zakomentowane z domyślną, pustą wartością)
 if grep -q '^#RuntimeWatchdogSec=[[:space:]]*$' "$SYSTEM_CONF"; then
     sed -i 's/^#RuntimeWatchdogSec=[[:space:]]*$/RuntimeWatchdogSec=15/' "$SYSTEM_CONF"
     echo "   -> Watchdog ustawiony na 15s."
 elif grep -q "RuntimeWatchdogSec=15" "$SYSTEM_CONF"; then
     echo "   -> Watchdog już jest skonfigurowany."
 else
-    # Jeśli linia nie istnieje lub jest inna, dopisujemy na koniec (mniej eleganckie, ale skuteczne)
-    # Dla bezpieczeństwa prosta informacja dla użytkownika
-    echo "   -> Nie znaleziono standardowej linii w \"$SYSTEM_CONF\". Sprawdź plik ręcznie."
+    # Jeśli linia jest inna lub jej brak, sprawdźmy czy przypadkiem nie jest ustawiona na inną wartość
+    if grep -q "RuntimeWatchdogSec=" "$SYSTEM_CONF"; then
+         echo "   -> Watchdog jest ustawiony na inną wartość niż domyślna. Nie zmieniam."
+    else
+         echo "   -> Nie znaleziono standardowej linii w \"$SYSTEM_CONF\". Sprawdź plik ręcznie."
+    fi
 fi
 
 echo "=== Zakończono. Zalecany restart systemu: sudo reboot ==="
