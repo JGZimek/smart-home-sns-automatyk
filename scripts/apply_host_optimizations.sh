@@ -35,7 +35,11 @@ systemctl enable wifi-power-off.service
 systemctl start wifi-power-off.service
 
 # Weryfikacja
-CURRENT_PM=$(iwconfig wlan0 | grep "Power Management")
+if command -v iwconfig >/dev/null 2>&1; then
+    CURRENT_PM=$(iwconfig wlan0 2>/dev/null | grep "Power Management" || echo "Power Management status unavailable")
+else
+    CURRENT_PM="iwconfig command not found; cannot verify Power Management status"
+fi
 echo "   -> Status: $CURRENT_PM"
 
 
