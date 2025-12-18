@@ -256,13 +256,22 @@ void networkTask(void * parameter) {
                     default:   snprintf(topicBuffer, 64, "home/garden/environment/log"); break;
                 }
             } else {
-                const char* metric = "unknown";
+                const char* metric = nullptr;
+                bool validMetric = true;
                 switch(inMsg.type) {
                     case VOLT: metric = "voltage"; break;
                     case CURR: metric = "current"; break;
                     case WATT: metric = "power"; break;
+                    default:
+                        validMetric = false;
+                        ESP_LOGW(TAG_MQTT, "Unexpected power metric type (%d) for sourceId %d, routing to log topic", inMsg.type, inMsg.sourceId);
+                        break;
                 }
-                snprintf(topicBuffer, 64, "home/garden/power/%d/%s", inMsg.sourceId, metric);
+                if (!validMetric || metric == nullptr) {
+                    snprintf(topicBuffer, 64, "home/garden/power/%d/log", inMsg.sourceId);
+                } else {
+                    snprintf(topicBuffer, 64, "home/garden/power/%d/%s", inMsg.sourceId, metric);
+                }
             }
 
             snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
