@@ -172,8 +172,8 @@ void sensorControlTask(void * parameter) {
         ESP_LOGE(TAG_PWR, "INA219 #2 (Addr 0x%X) Not Found", INA2_ADDR);
         pwr2_connected = false;
     } else {
-        // NOTE: 32V_2A range. For low-current battery monitoring (<1A), changing to 32V_1A increases precision.
-        pwr2.setCalibration_32V_2A(); 
+        // NOTE: Using 32V_1A range for improved precision with low-current battery monitoring (<1A).
+        pwr2.setCalibration_32V_1A(); 
         pwr2_connected = true;
         ESP_LOGI(TAG_PWR, "INA219 #2 (Battery) Connected");
     }
