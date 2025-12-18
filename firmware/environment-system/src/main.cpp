@@ -382,7 +382,7 @@ void setup() {
     
     initTime();
 
-    // Queue size increased to 100 to provide approx 50s buffer during network outages
+    // Queue size increased to 100 to provide approx 55s buffer during network outages
     msgQueue = xQueueCreate(100, sizeof(SensorMeasurement));
     if (msgQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
