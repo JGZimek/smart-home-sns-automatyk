@@ -83,7 +83,7 @@ elif grep -q "RuntimeWatchdogSec=15" "$SYSTEM_CONF"; then
 else
     # Jeśli linia nie istnieje lub jest inna, dopisujemy na koniec (mniej eleganckie, ale skuteczne)
     # Dla bezpieczeństwa prosta informacja dla użytkownika
-    echo "   -> Nie znaleziono standardowej linii w $SYSTEM_CONF. Sprawdź plik ręcznie."
+    echo "   -> Nie znaleziono standardowej linii w \"$SYSTEM_CONF\". Sprawdź plik ręcznie."
 fi
 
 echo "=== Zakończono. Zalecany restart systemu: sudo reboot ==="
