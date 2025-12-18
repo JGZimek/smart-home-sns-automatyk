@@ -7,7 +7,7 @@
 #include <time.h>
 #include "esp_log.h"
 
-// --- TAGI LOGÓW ---
+// --- LOG TAGS ---
 static const char* TAG_MAIN = "ENV_SYS";
 static const char* TAG_WIFI = "WIFI";
 static const char* TAG_MQTT = "MQTT";
@@ -15,21 +15,21 @@ static const char* TAG_SENS = "SENS";
 static const char* TAG_PWR  = "POWER";
 static const char* TAG_TIME = "TIME";
 
-// --- KONFIGURACJA PINÓW ---
+// --- PIN CONFIG ---
 #define PIN_I2C_SDA     21
 #define PIN_I2C_SCL     22
 
-// --- ADRESY I2C ---
+// --- I2C ADDRESSES ---
 #define INA1_ADDR       0x45 // Wattmeter 1 (Solar)
 #define INA2_ADDR       0x44 // Wattmeter 2 (Battery)
 
-// --- USTAWIENIA ---
+// --- SETTINGS ---
 #define SENSOR_INTERVAL 5000
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3600;      // UTC+1
-const int   daylightOffset_sec = 3600; // UTC+2 (Lato)
+const int   daylightOffset_sec = 3600; // UTC+2 (Summer)
 
-// --- OBIEKTY GLOBALNE ---
+// --- GLOBAL OBJECTS ---
 WiFiManager wm;
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -50,7 +50,7 @@ char mqtt_port[6] = "1883";
 const char* mqtt_user = "esp32";
 const char* mqtt_pass = "esp32";
 
-// --- STRUKTURY DANYCH ---
+// --- DATA STRUCTURES ---
 enum SensorType { TEMP, HUM, PRES, VOLT, CURR, WATT };
 
 struct SensorMeasurement {
@@ -62,7 +62,7 @@ struct SensorMeasurement {
 
 QueueHandle_t msgQueue;
 
-// --- FUNKCJE POMOCNICZE ---
+// --- HELPER FUNCTIONS ---
 
 void saveParamsCallback() {
     ESP_LOGI(TAG_WIFI, "Saving configuration from captive portal...");
@@ -151,7 +151,7 @@ void sensorControlTask(void * parameter) {
         bme_connected = true;
     }
 
-    // Init Watomierz 1 (Solar)
+    // Init Wattmeter 1 (Solar)
     if (!pwr1.begin(&Wire)) {
         ESP_LOGE(TAG_PWR, "INA219 #1 (Addr 0x%X) Not Found", INA1_ADDR);
         pwr1_connected = false;
@@ -161,7 +161,7 @@ void sensorControlTask(void * parameter) {
         ESP_LOGI(TAG_PWR, "INA219 #1 (Solar) Connected");
     }
 
-    // Init Watomierz 2 (Battery)
+    // Init Wattmeter 2 (Battery)
     if (!pwr2.begin(&Wire)) {
         ESP_LOGE(TAG_PWR, "INA219 #2 (Addr 0x%X) Not Found", INA2_ADDR);
         pwr2_connected = false;
@@ -175,57 +175,75 @@ void sensorControlTask(void * parameter) {
         time_t now;
         time(&now); 
 
-        // 1. Odczyt BME280
+        // 1. Read BME280 (only if connected)
         if (bme_connected) {
             float temp = bme.readTemperature();
             float hum = bme.readHumidity();
             float pres = bme.readPressure() / 100.0F;
 
-            SensorMeasurement m;
-            m.timestamp = now;
-            m.sourceId = 0; // ID 0 = Środowisko
+            // Validate readings (check for NaN)
+            if (isnan(temp) || isnan(hum) || isnan(pres)) {
+                ESP_LOGW(TAG_SENS, "Invalid BME280 reading (NaN). Skipping.");
+            } else {
+                SensorMeasurement m;
+                m.timestamp = now;
+                m.sourceId = 0; // ID 0 = Environment
 
-            m.type = TEMP; m.value = temp;
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env TEMP");
-            
-            m.type = HUM; m.value = hum; 
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env HUM");
+                m.type = TEMP; m.value = temp;
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env TEMP");
+                
+                m.type = HUM; m.value = hum; 
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env HUM");
 
-            m.type = PRES; m.value = pres; 
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env PRES");
+                m.type = PRES; m.value = pres; 
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env PRES");
+            }
         }
 
-        // 2. Odczyt Watomierza 1 (Solar)
+        // 2. Read Wattmeter 1 (Solar)
         if (pwr1_connected) {
+            float v = pwr1.getBusVoltage_V();
+            float c = pwr1.getCurrent_mA();
+            float w = pwr1.getPower_mW();
+
+            // Basic validation (e.g. power should not be negative for source)
+            // Note: INA219 can measure negative current if wired backwards, 
+            // but for solar generation we usually expect positive flow or ~0.
+            // We pass it through but could add checks here if needed.
+
             SensorMeasurement m;
             m.timestamp = now;
             m.sourceId = 1;
             
-            m.type = VOLT; m.value = pwr1.getBusVoltage_V(); 
+            m.type = VOLT; m.value = v; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar VOLT");
 
-            m.type = CURR; m.value = pwr1.getCurrent_mA(); 
+            m.type = CURR; m.value = c; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar CURR");
 
-            // Konwersja mW -> W dla czytelności (zgodnie z uwagą)
-            m.type = WATT; m.value = pwr1.getPower_mW() / 1000.0f; 
+            // Convert mW to W for readability
+            m.type = WATT; m.value = w / 1000.0f; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar WATT");
         }
 
-        // 3. Odczyt Watomierza 2 (Battery)
+        // 3. Read Wattmeter 2 (Battery)
         if (pwr2_connected) {
+            float v = pwr2.getBusVoltage_V();
+            float c = pwr2.getCurrent_mA();
+            float w = pwr2.getPower_mW();
+
             SensorMeasurement m;
             m.timestamp = now;
             m.sourceId = 2;
             
-            m.type = VOLT; m.value = pwr2.getBusVoltage_V(); 
+            m.type = VOLT; m.value = v; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt VOLT");
 
-            m.type = CURR; m.value = pwr2.getCurrent_mA(); 
+            m.type = CURR; m.value = c; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt CURR");
 
-            // Konwersja mW -> W dla czytelności (zgodnie z uwagą)
-            m.type = WATT; m.value = pwr2.getPower_mW() / 1000.0f; 
+            // Convert mW to W for readability
+            m.type = WATT; m.value = w / 1000.0f; 
             if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt WATT");
         }
 
@@ -263,7 +281,7 @@ void networkTask(void * parameter) {
             
             // --- TOPIC GENERATION ---
             if (inMsg.sourceId == 0) {
-                // Dane środowiskowe (BME280)
+                // Environmental data (BME280)
                 switch(inMsg.type) {
                     case TEMP: snprintf(topicBuffer, 64, "home/garden/environment/temperature"); break;
                     case HUM:  snprintf(topicBuffer, 64, "home/garden/environment/humidity"); break;
@@ -271,7 +289,7 @@ void networkTask(void * parameter) {
                     default:   snprintf(topicBuffer, 64, "home/garden/environment/log"); break;
                 }
             } else {
-                // Dane zasilania (INA219)
+                // Power data (INA219)
                 const char* sourceName = "unknown";
                 if (inMsg.sourceId == 1) {
                     sourceName = "solar";
