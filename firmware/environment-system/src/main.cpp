@@ -277,9 +277,7 @@ void networkTask(void * parameter) {
             snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
 
             if (client.publish(topicBuffer, payloadBuffer)) {
-                if (inMsg.type == TEMP || inMsg.type == WATT) {
-                    ESP_LOGI(TAG_MQTT, "Sent %s: %.2f", topicBuffer, inMsg.value);
-                }
+                ESP_LOGI(TAG_MQTT, "Sent %s: %.2f", topicBuffer, inMsg.value);
             } else {
                 ESP_LOGE(TAG_MQTT, "Publish failed!");
             }
