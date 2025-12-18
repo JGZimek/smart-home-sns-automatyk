@@ -33,6 +33,7 @@ After=network.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 ExecStart=${IWCONFIG_PATH} wlan0 power off
 
 [Install]
