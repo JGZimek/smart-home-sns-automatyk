@@ -229,22 +229,21 @@ void sensorControlTask(void * parameter) {
             ir = lum >> 16;
             full = lum & 0xFFFF;
 
-            // Calculate Lux
-            float lux = tsl.calculateLux(full, ir);
-
-            // Check for saturation (sensor blinded)
+            // Check for saturation (sensor blinded) before calculating lux
             if (full == 0xFFFF) {
-                lux = -1.0; // Use -1 to indicate saturation/error
                 ESP_LOGW(TAG_SENS, "TSL2591 Saturated! (Too bright)");
-            }
+            } else {
+                // Calculate Lux only when not saturated
+                float lux = tsl.calculateLux(full, ir);
 
-            if (!isnan(lux)) {
-                SensorMeasurement m;
-                m.timestamp = now;
-                m.sourceId = 0; // Environment group
-                m.type = LIGHT; 
-                m.value = lux;
-                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env LIGHT");
+                if (!isnan(lux)) {
+                    SensorMeasurement m;
+                    m.timestamp = now;
+                    m.sourceId = 0; // Environment group
+                    m.type = LIGHT; 
+                    m.value = lux;
+                    if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env LIGHT");
+                }
             }
         }
 
