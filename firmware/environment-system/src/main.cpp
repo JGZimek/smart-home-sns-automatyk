@@ -140,7 +140,12 @@ void initTime() {
 void sensorControlTask(void * parameter) {
     ESP_LOGI(TAG_SENS, "Task started on Core 1");
 
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    // Initialize I2C Bus
+    if(!Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL)) {
+        ESP_LOGE(TAG_SENS, "I2C Bus Init Failed!");
+    } else {
+        ESP_LOGI(TAG_SENS, "I2C Bus Init OK");
+    }
 
     // Init BME280
     if (!bme.begin(0x76, &Wire)) {
@@ -156,8 +161,9 @@ void sensorControlTask(void * parameter) {
         ESP_LOGE(TAG_PWR, "INA219 #1 (Addr 0x%X) Not Found", INA1_ADDR);
         pwr1_connected = false;
     } else {
-        pwr1_connected = true;
+        // NOTE: 32V_2A range assumes max 2A current. Ensure solar panel output does not exceed this.
         pwr1.setCalibration_32V_2A(); 
+        pwr1_connected = true;
         ESP_LOGI(TAG_PWR, "INA219 #1 (Solar) Connected");
     }
 
@@ -166,8 +172,9 @@ void sensorControlTask(void * parameter) {
         ESP_LOGE(TAG_PWR, "INA219 #2 (Addr 0x%X) Not Found", INA2_ADDR);
         pwr2_connected = false;
     } else {
-        pwr2_connected = true;
+        // NOTE: 32V_2A range. For low-current battery monitoring (<1A), changing to 32V_1A increases precision.
         pwr2.setCalibration_32V_2A(); 
+        pwr2_connected = true;
         ESP_LOGI(TAG_PWR, "INA219 #2 (Battery) Connected");
     }
     
@@ -203,49 +210,55 @@ void sensorControlTask(void * parameter) {
         // 2. Read Wattmeter 1 (Solar)
         if (pwr1_connected) {
             float v = pwr1.getBusVoltage_V();
-            float c = pwr1.getCurrent_mA();
-            float w = pwr1.getPower_mW();
+            float c_mA = pwr1.getCurrent_mA();
+            float w_mW = pwr1.getPower_mW();
 
-            // Basic validation (e.g. power should not be negative for source)
-            // Note: INA219 can measure negative current if wired backwards, 
-            // but for solar generation we usually expect positive flow or ~0.
-            // We pass it through but could add checks here if needed.
+            // Validate readings
+            if (isnan(v) || isnan(c_mA) || isnan(w_mW)) {
+                ESP_LOGW(TAG_PWR, "Invalid INA219 #1 (Solar) reading. Skipping.");
+            } else {
+                SensorMeasurement m;
+                m.timestamp = now;
+                m.sourceId = 1;
+                
+                m.type = VOLT; m.value = v; 
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar VOLT");
 
-            SensorMeasurement m;
-            m.timestamp = now;
-            m.sourceId = 1;
-            
-            m.type = VOLT; m.value = v; 
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar VOLT");
+                // Convert mA to A for consistency
+                m.type = CURR; m.value = c_mA / 1000.0f; 
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar CURR");
 
-            m.type = CURR; m.value = c; 
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar CURR");
-
-            // Convert mW to W for readability
-            m.type = WATT; m.value = w / 1000.0f; 
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar WATT");
+                // Convert mW to W for readability
+                m.type = WATT; m.value = w_mW / 1000.0f; 
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar WATT");
+            }
         }
 
         // 3. Read Wattmeter 2 (Battery)
         if (pwr2_connected) {
             float v = pwr2.getBusVoltage_V();
-            float c = pwr2.getCurrent_mA();
-            float w = pwr2.getPower_mW();
+            float c_mA = pwr2.getCurrent_mA();
+            float w_mW = pwr2.getPower_mW();
 
-            SensorMeasurement m;
-            m.timestamp = now;
-            m.sourceId = 2;
-            
-            m.type = VOLT; m.value = v; 
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt VOLT");
+            // Validate readings
+            if (isnan(v) || isnan(c_mA) || isnan(w_mW)) {
+                ESP_LOGW(TAG_PWR, "Invalid INA219 #2 (Battery) reading. Skipping.");
+            } else {
+                SensorMeasurement m;
+                m.timestamp = now;
+                m.sourceId = 2;
+                
+                m.type = VOLT; m.value = v; 
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt VOLT");
 
-            // Convert mA to A for consistency with V and W
-            m.type = CURR; m.value = c / 1000.0f;
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt CURR");
+                // Convert mA to A for consistency
+                m.type = CURR; m.value = c_mA / 1000.0f; 
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt CURR");
 
-            // Convert mW to W for readability
-            m.type = WATT; m.value = w / 1000.0f; 
-            if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt WATT");
+                // Convert mW to W for readability
+                m.type = WATT; m.value = w_mW / 1000.0f; 
+                if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt WATT");
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(SENSOR_INTERVAL));
@@ -303,7 +316,7 @@ void networkTask(void * parameter) {
                 switch(inMsg.type) {
                     case VOLT: metric = "voltage"; break;
                     case CURR: metric = "current"; break;
-                    case WATT: metric = "power"; break; // Value is already in Watts
+                    case WATT: metric = "power"; break;
                     default:
                         ESP_LOGE(TAG_PWR, "Unsupported type: %d (sourceId=%d)", inMsg.type, inMsg.sourceId);
                         validMetric = false;
@@ -318,11 +331,8 @@ void networkTask(void * parameter) {
                 }
             }
 
-            // Precision: 4 decimal places for Watts and current (for better low-current resolution),
-            // 2 decimal places for other measurements.
-            if (inMsg.type == WATT) {
-                snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
-            } else if (inMsg.type == CURR) {
+            // Precision: 4 decimal places for Watts and current, 2 for others
+            if (inMsg.type == WATT || inMsg.type == CURR) {
                 snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
             } else {
                 snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
@@ -372,15 +382,16 @@ void setup() {
     
     initTime();
 
-    // Queue size increased to 60 to accommodate power sensors
-    msgQueue = xQueueCreate(60, sizeof(SensorMeasurement));
+    // Queue size increased to 100 to provide approx 50s buffer during network outages
+    msgQueue = xQueueCreate(100, sizeof(SensorMeasurement));
     if (msgQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
         while(1); 
     }
 
+    // Increased stack size for sensor task to handle I2C ops and validations safely
     xTaskCreatePinnedToCore(networkTask, "NetTask", 8192, NULL, 1, NULL, 0);
-    xTaskCreatePinnedToCore(sensorControlTask, "SensTask", 4096, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(sensorControlTask, "SensTask", 6144, NULL, 1, NULL, 1);
 }
 
 void loop() { vTaskDelete(NULL); }
