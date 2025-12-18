@@ -16,7 +16,7 @@ SERVICE_FILE="/etc/systemd/system/wifi-power-off.service"
 
 echo "[1/3] Konfiguracja WiFi Power Management..."
 
-cat <<EOF > $SERVICE_FILE
+cat <<EOF > "$SERVICE_FILE"
 [Unit]
 Description=Disable WiFi Power Management for stability
 After=network.target
