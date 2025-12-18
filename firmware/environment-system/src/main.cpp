@@ -350,7 +350,7 @@ void setup() {
     
     initTime();
 
-    // Zwiększono kolejkę do 60
+    // Queue size increased to 60 to accommodate power sensors
     msgQueue = xQueueCreate(60, sizeof(SensorMeasurement));
     if (msgQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
