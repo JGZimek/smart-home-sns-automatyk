@@ -14,16 +14,18 @@ echo "=== Starting Raspberry Pi Zero 2 W Optimization for SmartHome ==="
 # --- 1. WIFI POWER MANAGEMENT (Disable for stability) ---
 echo "[1/3] Configuring WiFi Power Management..."
 
-# Verify if iwconfig is available BEFORE creating the service
+# Verify if iwconfig is available and get path
 if ! command -v iwconfig >/dev/null 2>&1; then
     echo "Error: 'iwconfig' command not found."
     echo "Please install wireless-tools (sudo apt install wireless-tools) and retry."
     exit 1
 fi
 
+# Resolve absolute path to avoid hardcoding /sbin/iwconfig
+IWCONFIG_PATH=$(command -v iwconfig)
 SERVICE_FILE="/etc/systemd/system/wifi-power-off.service"
 
-# Create service file
+# Create service file using the resolved path
 cat <<EOF > "$SERVICE_FILE"
 [Unit]
 Description=Disable WiFi Power Management for stability
@@ -31,13 +33,13 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/sbin/iwconfig wlan0 power off
+ExecStart=${IWCONFIG_PATH} wlan0 power off
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo "   -> Service file created."
+echo "   -> Service file created using path: ${IWCONFIG_PATH}"
 
 # Reload and enable service
 systemctl daemon-reload
@@ -45,7 +47,7 @@ systemctl enable wifi-power-off.service
 systemctl start wifi-power-off.service
 
 # Verification
-CURRENT_PM=$(iwconfig wlan0 2>/dev/null | grep "Power Management" || echo "Unknown")
+CURRENT_PM=$(${IWCONFIG_PATH} wlan0 2>/dev/null | grep "Power Management" || echo "Unknown")
 echo "   -> Current Status: $CURRENT_PM"
 
 
@@ -61,16 +63,21 @@ else
         echo "   -> Configuration file $SWAP_CONF does not exist. Creating new one..."
         echo "CONF_SWAPSIZE=1024" > "$SWAP_CONF"
         
+        # Setup and start service cleanly
         dphys-swapfile setup
-        dphys-swapfile swapon
+        systemctl enable dphys-swapfile
+        systemctl restart dphys-swapfile
         echo "   -> Swap set to 1024MB (new file created)."
     else
-        # CREATE BACKUP
-        cp "$SWAP_CONF" "${SWAP_CONF}.bak"
-        echo "   -> Backup created at ${SWAP_CONF}.bak"
+        # CREATE BACKUP (only if it doesn't exist to preserve original state)
+        if [ ! -f "${SWAP_CONF}.bak" ]; then
+            cp "$SWAP_CONF" "${SWAP_CONF}.bak"
+            echo "   -> Backup created at ${SWAP_CONF}.bak"
+        else
+            echo "   -> Backup already exists at ${SWAP_CONF}.bak (skipping overwrite)"
+        fi
 
         # Universal logic: find CONF_SWAPSIZE (commented or not) and enforce 1024
-        # We use grep in if condition (it's safe with set -e)
         if grep -qE "^#?CONF_SWAPSIZE=" "$SWAP_CONF"; then
             sed -i -E 's/^#?CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' "$SWAP_CONF"
             echo "   -> Configuration updated in file."
@@ -79,9 +86,9 @@ else
             echo "   -> Configuration appended to file."
         fi
         
-        # Apply changes
+        # Apply changes using systemctl to avoid 'swapon' errors when swap is active
         dphys-swapfile setup
-        dphys-swapfile swapon
+        systemctl restart dphys-swapfile
         echo "   -> Swap service restarted successfully."
     fi
 fi
@@ -91,12 +98,12 @@ fi
 SYSTEM_CONF="/etc/systemd/system.conf"
 echo "[3/3] Configuring Systemd RuntimeWatchdog..."
 
-# CREATE BACKUP (do not overwrite existing original backup)
+# CREATE BACKUP (only if it doesn't exist)
 if [ ! -f "${SYSTEM_CONF}.bak" ]; then
     cp "$SYSTEM_CONF" "${SYSTEM_CONF}.bak"
     echo "   -> Backup created at ${SYSTEM_CONF}.bak"
 else
-    echo "   -> Backup already exists at ${SYSTEM_CONF}.bak (not overwritten)"
+    echo "   -> Backup already exists at ${SYSTEM_CONF}.bak (skipping overwrite)"
 fi
 
 if grep -q '^#RuntimeWatchdogSec=.*' "$SYSTEM_CONF"; then
