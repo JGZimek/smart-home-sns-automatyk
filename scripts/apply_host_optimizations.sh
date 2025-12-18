@@ -99,8 +99,8 @@ else
     echo "   -> Backup already exists at ${SYSTEM_CONF}.bak (not overwritten)"
 fi
 
-if grep -q '^#RuntimeWatchdogSec=[[:space:]]*$' "$SYSTEM_CONF"; then
-    sed -i 's/^#RuntimeWatchdogSec=[[:space:]]*$/RuntimeWatchdogSec=15/' "$SYSTEM_CONF"
+if grep -q '^#RuntimeWatchdogSec=.*' "$SYSTEM_CONF"; then
+    sed -i 's/^#RuntimeWatchdogSec=.*/RuntimeWatchdogSec=15/' "$SYSTEM_CONF"
     echo "   -> Watchdog set to 15s."
 elif grep -q "RuntimeWatchdogSec=15" "$SYSTEM_CONF"; then
     echo "   -> Watchdog is already configured correctly."
