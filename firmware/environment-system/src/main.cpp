@@ -206,9 +206,18 @@ void sensorControlTask(void * parameter) {
             float w = pwr2.getPower_mW();
             
             m.sourceId = 2;
-            m.type = VOLT; m.value = v; xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10));
-            m.type = CURR; m.value = c; xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10));
-            m.type = WATT; m.value = w; xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10));
+            m.type = VOLT; m.value = v;
+            if (xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) {
+                ESP_LOGW(TAG_PWR, "Queue full! Dropping wattmeter 2 VOLT measurement");
+            }
+            m.type = CURR; m.value = c;
+            if (xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) {
+                ESP_LOGW(TAG_PWR, "Queue full! Dropping wattmeter 2 CURR measurement");
+            }
+            m.type = WATT; m.value = w;
+            if (xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) {
+                ESP_LOGW(TAG_PWR, "Queue full! Dropping wattmeter 2 WATT measurement");
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(SENSOR_INTERVAL));
