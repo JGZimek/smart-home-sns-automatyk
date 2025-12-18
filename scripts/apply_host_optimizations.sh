@@ -109,15 +109,15 @@ fi
 
 if grep -q '^#RuntimeWatchdogSec=.*' "$SYSTEM_CONF"; then
     sed -i 's/^#RuntimeWatchdogSec=.*/RuntimeWatchdogSec=15/' "$SYSTEM_CONF"
-    echo "   -> Watchdog set to 15s."
-elif grep -q "RuntimeWatchdogSec=15" "$SYSTEM_CONF"; then
-    echo "   -> Watchdog is already configured correctly."
+    echo "   -> Watchdog set to 15s (uncommented and applied)."
+elif grep -q '^RuntimeWatchdogSec=15\b' "$SYSTEM_CONF"; then
+    echo "   -> Watchdog is already configured correctly (15s)."
+elif grep -q '^RuntimeWatchdogSec=' "$SYSTEM_CONF"; then
+    sed -i 's/^RuntimeWatchdogSec=.*/RuntimeWatchdogSec=15/' "$SYSTEM_CONF"
+    echo "   -> Watchdog updated to 15s from existing value."
 else
-    if grep -q "RuntimeWatchdogSec=" "$SYSTEM_CONF"; then
-        echo "   -> Watchdog is set to a non-default value. Skipping modification."
-    else
-        echo "Warning: Standard RuntimeWatchdogSec line not found in $SYSTEM_CONF. Please check manually."
-    fi
+    echo "   -> RuntimeWatchdogSec line not found; adding with value 15s."
+    echo "RuntimeWatchdogSec=15" >> "$SYSTEM_CONF"
 fi
 
 echo "=== Optimization Complete. Recommended action: sudo reboot ==="
