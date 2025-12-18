@@ -309,7 +309,11 @@ void networkTask(void * parameter) {
             if (client.publish(topicBuffer, payloadBuffer)) {
                 // Log only selected values to reduce noise
                 if (inMsg.type == TEMP || inMsg.type == WATT) {
-                    ESP_LOGI(TAG_MQTT, "Sent %s: %.4f", topicBuffer, inMsg.value);
+                    if (inMsg.type == WATT) {
+                        ESP_LOGI(TAG_MQTT, "Sent %s: %.4f", topicBuffer, inMsg.value);
+                    } else {
+                        ESP_LOGI(TAG_MQTT, "Sent %s: %.2f", topicBuffer, inMsg.value);
+                    }
                 }
             } else {
                 ESP_LOGE(TAG_MQTT, "Publish failed!");
