@@ -325,9 +325,9 @@ void networkTask(void * parameter) {
                 
                 if (validMetric) {
                     // Format: home/garden/power/solar/voltage
-                    snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
+                    snprintf(topicBuffer, sizeof(topicBuffer), "home/garden/power/%s/%s", sourceName, metric);
                 } else {
-                    snprintf(topicBuffer, 64, "home/garden/power/%s/error", sourceName);
+                    snprintf(topicBuffer, sizeof(topicBuffer), "home/garden/power/%s/error", sourceName);
                 }
             }
 
