@@ -284,7 +284,7 @@ void networkTask(void * parameter) {
                 switch(inMsg.type) {
                     case VOLT: metric = "voltage"; break;
                     case CURR: metric = "current"; break;
-                    case WATT: metric = "power"; break; // Wartość jest już w Watach
+                    case WATT: metric = "power"; break; // Value is already in Watts
                     default:
                         ESP_LOGE(TAG_PWR, "Unsupported type: %d (sourceId=%d)", inMsg.type, inMsg.sourceId);
                         validMetric = false;
