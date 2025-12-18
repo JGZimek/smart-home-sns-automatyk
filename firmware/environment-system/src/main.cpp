@@ -39,7 +39,7 @@ Adafruit_BME280 bme;
 Adafruit_INA219 pwr1(INA1_ADDR);
 Adafruit_INA219 pwr2(INA2_ADDR);
 
-// Flagi statusu czujników
+// Sensor status flags
 bool bme_connected = false;
 bool pwr1_connected = false;
 bool pwr2_connected = false;
