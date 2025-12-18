@@ -307,7 +307,7 @@ void networkTask(void * parameter) {
             }
 
             if (client.publish(topicBuffer, payloadBuffer)) {
-                // Loguj tylko wybrane, żeby nie śmiecić
+                // Log only selected values to reduce noise
                 if (inMsg.type == TEMP || inMsg.type == WATT) {
                     ESP_LOGI(TAG_MQTT, "Sent %s: %.4f", topicBuffer, inMsg.value);
                 }
