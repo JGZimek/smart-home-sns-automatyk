@@ -3,7 +3,7 @@
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include <Adafruit_BME280.h>
-#include <Adafruit_INA219.h> // Biblioteka Adafruit
+#include <Adafruit_INA219.h>
 #include <time.h>
 #include "esp_log.h"
 
