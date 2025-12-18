@@ -20,8 +20,8 @@ static const char* TAG_TIME = "TIME";
 #define PIN_I2C_SCL     22
 
 // --- ADRESY I2C ---
-#define INA1_ADDR       0x45 // Watomierz 1 (Solar)
-#define INA2_ADDR       0x44 // Watomierz 2 (Bateria)
+#define INA1_ADDR       0x45 // Wattmeter 1 (Solar)
+#define INA2_ADDR       0x44 // Wattmeter 2 (Battery)
 
 // --- USTAWIENIA ---
 #define SENSOR_INTERVAL 5000
