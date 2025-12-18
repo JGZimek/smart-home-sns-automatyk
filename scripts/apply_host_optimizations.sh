@@ -3,7 +3,7 @@
 # Upewnij się, że skrypt jest uruchomiony jako root
 if [ "$EUID" -ne 0 ]
   then echo "Proszę uruchom ten skrypt jako root (sudo)"
-  exit
+  exit 1
 fi
 
 echo "=== Rozpoczynam optymalizację Raspberry Pi Zero 2 W dla SmartHome ==="
