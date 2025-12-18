@@ -20,8 +20,11 @@ static const char* TAG_TIME = "TIME";
 #define PIN_I2C_SCL     22
 
 // --- ADRESY I2C ---
-#define INA1_ADDR       0x45 // Watomierz 1 (Solar)
-#define INA2_ADDR       0x44 // Watomierz 2 (Bateria)
+// Uwaga: Domyślny adres INA219 to 0x40. Moduły zostały skonfigurowane sprzętowo
+// (piny/jumpery adresowe A0/A1 na płytkach INA219) tak, aby używać poniższych adresów.
+// Upewnij się, że ustawienia zworek A0/A1 na obu modułach odpowiadają tym adresom.
+#define INA1_ADDR       0x45 // Watomierz 1 (Solar)  - INA219 na adresie 0x45
+#define INA2_ADDR       0x44 // Watomierz 2 (Bateria) - INA219 na adresie 0x44
 
 // --- USTAWIENIA ---
 #define SENSOR_INTERVAL 5000
