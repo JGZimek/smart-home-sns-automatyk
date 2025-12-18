@@ -341,7 +341,7 @@ void setup() {
     
     initTime();
 
-    // Zwiększono kolejkę do 60, aby pomieścić ~35s danych (9 pomiarów co 5s = 1.8 msg/s) w przypadku awarii sieci.
+    // Zwiększono kolejkę do 60, aby pomieścić ~33s danych (9 pomiarów co 5s = 1.8 msg/s) w przypadku awarii sieci.
     msgQueue = xQueueCreate(60, sizeof(SensorMeasurement));
     if (msgQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
