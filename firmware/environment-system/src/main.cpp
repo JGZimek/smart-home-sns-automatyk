@@ -263,10 +263,19 @@ void networkTask(void * parameter) {
                 else if (inMsg.sourceId == 2) sourceName = "battery"; // ID 2 -> battery
 
                 const char* metric = "unknown";
+                bool validMetric = true;
                 switch(inMsg.type) {
                     case VOLT: metric = "voltage"; break;
                     case CURR: metric = "current"; break;
                     case WATT: metric = "power"; break;
+                    default:
+                        ESP_LOGE(TAG_PWR, "Unsupported power sensor type: %d (sourceId=%d)", inMsg.type, inMsg.sourceId);
+                        validMetric = false;
+                        break;
+                }
+                if (!validMetric) {
+                    // Skip publishing for unsupported metric types to avoid invalid MQTT topics
+                    continue;
                 }
                 // Format: home/garden/power/solar/voltage
                 snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
