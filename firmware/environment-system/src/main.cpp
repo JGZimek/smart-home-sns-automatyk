@@ -97,6 +97,7 @@ struct NetworkMessage {
 
 QueueHandle_t msgQueue; // Sensor data queue (now holds NetworkMessage)
 QueueHandle_t cmdQueue; // Control command queue
+QueueHandle_t statusQueue; // Feedback queue for fan status
 
 // --- HELPER FUNCTIONS ---
 
@@ -163,8 +164,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     // Parse Payload
     if (validCommand) {
-        if (msg.equalsIgnoreCase("ON")) cmd.state = true;
-        else if (msg.equalsIgnoreCase("OFF")) cmd.state = false;
+        if (strcasecmp(msg, "ON") == 0) cmd.state = true;
+        else if (strcasecmp(msg, "OFF") == 0) cmd.state = false;
         else {
             ESP_LOGW(TAG_MQTT, "Invalid payload: %s", msg);
             validCommand = false;
@@ -175,8 +176,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (validCommand) {
         if (xQueueSend(cmdQueue, &cmd, pdMS_TO_TICKS(10)) != pdTRUE) {
             ESP_LOGE(TAG_MQTT, "Command Queue Full! Dropping command.");
-            // Inform MQTT sender that the command was rejected due to overload
-            client.publish("home/garden/system/error", "CMD_REJECTED_QUEUE_FULL", false);
+            
+            // Queue error message instead of publishing directly
+            NetworkMessage errMsg;
+            errMsg.msgType = ERROR_MSG;
+            strncpy(errMsg.data.errorText, "CMD_QUEUE_FULL", 31);
+            xQueueSend(msgQueue, &errMsg, 0); 
         }
     }
 }
@@ -265,7 +270,7 @@ void controlTask(void * parameter) {
             
             digitalWrite(pin, level);
             
-            const char* fanName = (cmd.fanId == 1) ? "Cooling" : "Ventilation";
+            const char* fanName = (cmd.fanId == 1) ? "Cooling" : "Vent";
             const char* stateStr = (cmd.state) ? "ON" : "OFF";
             
             ESP_LOGI(TAG_CTRL, "Fan %s set to %s (Pin Level: %s)", fanName, stateStr, (level==LOW)?"LOW":"HIGH");
