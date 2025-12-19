@@ -14,11 +14,15 @@ static const char* TAG_WIFI = "WIFI";
 static const char* TAG_MQTT = "MQTT";
 static const char* TAG_SENS = "SENS";
 static const char* TAG_PWR  = "POWER";
+static const char* TAG_CTRL = "CTRL";
 static const char* TAG_TIME = "TIME";
 
 // --- PIN CONFIG ---
 #define PIN_I2C_SDA     21
 #define PIN_I2C_SCL     22
+// Fan Control Pins (Relay Module is usually Active LOW)
+#define PIN_FAN_COOLING 18 // Fan 1 -> Cooling
+#define PIN_FAN_VENT    19 // Fan 2 -> Ventilation
 
 // --- I2C ADDRESSES ---
 #define INA1_ADDR       0x45 // Wattmeter 1 (Solar)
@@ -60,12 +64,27 @@ enum SensorType { TEMP, HUM, PRES, VOLT, CURR, WATT, LIGHT };
 
 struct SensorMeasurement {
     SensorType type;
-    uint8_t sourceId; // 0=Env(BME/TSL), 1=Solar, 2=Battery
+    uint8_t sourceId; // 0=Env, 1=Solar, 2=Battery
     float value;
     time_t timestamp;
 };
 
-QueueHandle_t msgQueue;
+// Command structure for fans
+// fanId: 1 = Cooling, 2 = Ventilation
+struct FanCommand {
+    uint8_t fanId; 
+    bool state;    // true=ON, false=OFF
+};
+
+// Structure for Status Update (Feedback to backend)
+struct FanStatus {
+    uint8_t fanId;
+    bool state;
+};
+
+QueueHandle_t msgQueue; // Sensor data queue
+QueueHandle_t cmdQueue; // Control command queue
+QueueHandle_t statusQueue; // Feedback queue for fan status
 
 // --- HELPER FUNCTIONS ---
 
@@ -108,6 +127,43 @@ void printMqttError(int state) {
     }
 }
 
+// MQTT Callback function
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    String msg;
+    for (int i = 0; i < length; i++) msg += (char)payload[i];
+    
+    ESP_LOGI(TAG_MQTT, "CMD received: %s -> %s", topic, msg.c_str());
+
+    FanCommand cmd;
+    bool validCommand = false;
+
+    // Parse Topic - Using meaningful names
+    if (String(topic) == "home/garden/fan/cooling/set") {
+        cmd.fanId = 1; // Cooling
+        validCommand = true;
+    } else if (String(topic) == "home/garden/fan/vent/set") {
+        cmd.fanId = 2; // Ventilation
+        validCommand = true;
+    }
+
+    // Parse Payload
+    if (validCommand) {
+        if (msg == "ON") cmd.state = true;
+        else if (msg == "OFF") cmd.state = false;
+        else {
+            ESP_LOGW(TAG_MQTT, "Invalid payload: %s", msg.c_str());
+            validCommand = false;
+        }
+    }
+
+    // Send to Control Task if valid
+    if (validCommand) {
+        if (xQueueSend(cmdQueue, &cmd, 0) != pdTRUE) {
+            ESP_LOGE(TAG_MQTT, "Command Queue Full! Dropping command.");
+        }
+    }
+}
+
 void reconnectMqtt() {
     if (!client.connected()) {
         ESP_LOGI(TAG_MQTT, "Connecting to broker at %s...", mqtt_server);
@@ -115,6 +171,11 @@ void reconnectMqtt() {
         if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
             ESP_LOGI(TAG_MQTT, "Connected successfully!");
             client.publish("home/garden/system/status", "ONLINE");
+            
+            // Subscribe to control topics
+            client.subscribe("home/garden/fan/cooling/set");
+            client.subscribe("home/garden/fan/vent/set");
+            ESP_LOGI(TAG_MQTT, "Subscribed to fan control topics");
         } else {
             printMqttError(client.state());
         }
@@ -147,6 +208,47 @@ void configureTSL() {
 }
 
 // ---------------------------------------------------------
+// TASK 3: CONTROL TASK (Core 1)
+// ---------------------------------------------------------
+// Handles Fan Relay Logic (Active LOW: LOW=ON, HIGH=OFF)
+void controlTask(void * parameter) {
+    ESP_LOGI(TAG_CTRL, "Task started");
+    
+    // Initialize Pins
+    pinMode(PIN_FAN_COOLING, OUTPUT);
+    pinMode(PIN_FAN_VENT, OUTPUT);
+    
+    // Set initial state to OFF (HIGH for Active Low relays)
+    digitalWrite(PIN_FAN_COOLING, HIGH);
+    digitalWrite(PIN_FAN_VENT, HIGH);
+
+    FanCommand cmd;
+
+    for(;;) {
+        // Wait indefinitely for a message
+        if (xQueueReceive(cmdQueue, &cmd, portMAX_DELAY) == pdTRUE) {
+            int pin = (cmd.fanId == 1) ? PIN_FAN_COOLING : PIN_FAN_VENT;
+            
+            // LOGIC INVERSION for Relay Module (Active LOW)
+            // ON command -> LOW signal
+            // OFF command -> HIGH signal
+            int level = (cmd.state) ? LOW : HIGH; 
+            
+            digitalWrite(pin, level);
+            
+            const char* fanName = (cmd.fanId == 1) ? "Cooling" : "Vent";
+            const char* stateStr = (cmd.state) ? "ON" : "OFF";
+            
+            ESP_LOGI(TAG_CTRL, "Fan %s set to %s (Pin Level: %s)", fanName, stateStr, (level==LOW)?"LOW":"HIGH");
+            
+            // Send feedback status to MQTT task
+            FanStatus status = { cmd.fanId, cmd.state };
+            xQueueSend(statusQueue, &status, 0);
+        }
+    }
+}
+
+// ---------------------------------------------------------
 // TASK 1: SENSOR & CONTROL (Core 1)
 // ---------------------------------------------------------
 void sensorControlTask(void * parameter) {
@@ -159,47 +261,47 @@ void sensorControlTask(void * parameter) {
         tsl_connected  = false;
         pwr1_connected = false;
         pwr2_connected = false;
-        return;
-    }
-    ESP_LOGI(TAG_SENS, "I2C bus initialized on SDA=%d, SCL=%d", PIN_I2C_SDA, PIN_I2C_SCL);
-
-    // 1. Init BME280
-    if (!bme.begin(0x76, &Wire)) {
-        ESP_LOGE(TAG_SENS, "BME280 not found!");
-        bme_connected = false;
     } else {
-        ESP_LOGI(TAG_SENS, "BME280 initialized OK.");
-        bme_connected = true;
-    }
+        ESP_LOGI(TAG_SENS, "I2C bus initialized on SDA=%d, SCL=%d", PIN_I2C_SDA, PIN_I2C_SCL);
 
-    // 2. Init TSL2591 [NEW]
-    if (!tsl.begin(&Wire)) {
-        ESP_LOGE(TAG_SENS, "TSL2591 Not Found!");
-        tsl_connected = false;
-    } else {
-        ESP_LOGI(TAG_SENS, "TSL2591 initialized OK.");
-        tsl_connected = true;
-        configureTSL();
-    }
+        // 1. Init BME280
+        if (!bme.begin(0x76, &Wire)) {
+            ESP_LOGE(TAG_SENS, "BME280 not found!");
+            bme_connected = false;
+        } else {
+            ESP_LOGI(TAG_SENS, "BME280 initialized OK.");
+            bme_connected = true;
+        }
 
-    // 3. Init Wattmeter 1 (Solar)
-    if (!pwr1.begin(&Wire)) {
-        ESP_LOGE(TAG_PWR, "INA219 #1 (Addr 0x%X) Not Found", INA1_ADDR);
-        pwr1_connected = false;
-    } else {
-        pwr1.setCalibration_32V_2A(); 
-        pwr1_connected = true;
-        ESP_LOGI(TAG_PWR, "INA219 #1 (Solar) Connected");
-    }
+        // 2. Init TSL2591
+        if (!tsl.begin(&Wire)) {
+            ESP_LOGE(TAG_SENS, "TSL2591 Not Found!");
+            tsl_connected = false;
+        } else {
+            ESP_LOGI(TAG_SENS, "TSL2591 initialized OK.");
+            tsl_connected = true;
+            configureTSL();
+        }
 
-    // 4. Init Wattmeter 2 (Battery)
-    if (!pwr2.begin(&Wire)) {
-        ESP_LOGE(TAG_PWR, "INA219 #2 (Addr 0x%X) Not Found", INA2_ADDR);
-        pwr2_connected = false;
-    } else {
-        pwr2.setCalibration_32V_2A(); 
-        pwr2_connected = true;
-        ESP_LOGI(TAG_PWR, "INA219 #2 (Battery) Connected");
+        // 3. Init Wattmeter 1 (Solar)
+        if (!pwr1.begin(&Wire)) {
+            ESP_LOGE(TAG_PWR, "INA219 #1 (Addr 0x%X) Not Found", INA1_ADDR);
+            pwr1_connected = false;
+        } else {
+            pwr1.setCalibration_32V_2A(); 
+            pwr1_connected = true;
+            ESP_LOGI(TAG_PWR, "INA219 #1 (Solar) Connected");
+        }
+
+        // 4. Init Wattmeter 2 (Battery)
+        if (!pwr2.begin(&Wire)) {
+            ESP_LOGE(TAG_PWR, "INA219 #2 (Addr 0x%X) Not Found", INA2_ADDR);
+            pwr2_connected = false;
+        } else {
+            pwr2.setCalibration_32V_2A(); 
+            pwr2_connected = true;
+            ESP_LOGI(TAG_PWR, "INA219 #2 (Battery) Connected");
+        }
     }
     
     for(;;) {
@@ -230,21 +332,16 @@ void sensorControlTask(void * parameter) {
             }
         }
 
-        // --- TSL2591 Readings [NEW] ---
+        // --- TSL2591 Readings ---
         if (tsl_connected) {
-            // Read 32-bit luminosity data
             uint32_t lum = tsl.getFullLuminosity();
-            uint16_t ir, full;
-            ir = lum >> 16;
-            full = lum & 0xFFFF;
+            uint16_t ir = lum >> 16;
+            uint16_t full = lum & 0xFFFF;
 
-            // Check for saturation (sensor blinded) before calculating lux
             if (full == 0xFFFF) {
                 ESP_LOGW(TAG_SENS, "TSL2591 Saturated! (Too bright)");
             } else {
-                // Calculate Lux only when not saturated
                 float lux = tsl.calculateLux(full, ir);
-
                 if (!isnan(lux)) {
                     SensorMeasurement m;
                     m.timestamp = now;
@@ -315,39 +412,35 @@ void networkTask(void * parameter) {
     ESP_LOGI(TAG_MQTT, "Task started on Core 0");
     
     client.setServer(mqtt_server, 1883);
+    client.setCallback(mqttCallback); 
+
     SensorMeasurement inMsg;
+    FanStatus statusMsg;
     char topicBuffer[64];
     char payloadBuffer[128];
 
     for(;;) {
-        if (WiFi.status() != WL_CONNECTED) { 
-            vTaskDelay(pdMS_TO_TICKS(2000)); 
-            continue; 
-        }
-
+        if (WiFi.status() != WL_CONNECTED) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
+        
         if (!client.connected()) {
             reconnectMqtt();
-            if (!client.connected()) { 
-                vTaskDelay(pdMS_TO_TICKS(5000)); 
-                continue; 
-            }
+            if (!client.connected()) { vTaskDelay(pdMS_TO_TICKS(5000)); continue; }
         }
-        client.loop();
+        client.loop(); 
 
+        // 1. Process Sensor Data
         if (xQueueReceive(msgQueue, &inMsg, pdMS_TO_TICKS(10)) == pdTRUE) {
             
             // --- TOPIC GENERATION ---
             if (inMsg.sourceId == 0) {
-                // Environmental data
                 switch(inMsg.type) {
-                    case TEMP: snprintf(topicBuffer, 64, "home/garden/environment/temperature"); break;
-                    case HUM:  snprintf(topicBuffer, 64, "home/garden/environment/humidity"); break;
-                    case PRES: snprintf(topicBuffer, 64, "home/garden/environment/pressure"); break;
-                    case LIGHT: snprintf(topicBuffer, 64, "home/garden/environment/light"); break;
-                    default:   snprintf(topicBuffer, 64, "home/garden/environment/log"); break;
+                    case TEMP: snprintf(topicBuffer, 64, "home/garden/env/temperature"); break;
+                    case HUM:  snprintf(topicBuffer, 64, "home/garden/env/humidity"); break;
+                    case PRES: snprintf(topicBuffer, 64, "home/garden/env/pressure"); break;
+                    case LIGHT: snprintf(topicBuffer, 64, "home/garden/env/light"); break;
+                    default:   snprintf(topicBuffer, 64, "home/garden/env/log"); break;
                 }
             } else {
-                // Power data (INA219)
                 const char* sourceName = "unknown";
                 if (inMsg.sourceId == 1) sourceName = "solar";
                 else if (inMsg.sourceId == 2) sourceName = "battery";
@@ -379,16 +472,20 @@ void networkTask(void * parameter) {
             }
 
             if (client.publish(topicBuffer, payloadBuffer)) {
-                // Log select values
-                if (inMsg.type == LIGHT) {
-                    ESP_LOGI(TAG_MQTT, "Sent Light: %.4f Lux", inMsg.value);
-                } else if (inMsg.type == WATT) {
-                    ESP_LOGI(TAG_MQTT, "Sent Power: %.4f W", inMsg.value);
-                }
-            } else {
-                ESP_LOGE(TAG_MQTT, "Publish failed!");
+                if (inMsg.type == LIGHT) ESP_LOGI(TAG_MQTT, "Sent Light: %.1f Lux", inMsg.value);
             }
         }
+
+        // 2. Process Status Feedback (from Control Task)
+        if (xQueueReceive(statusQueue, &statusMsg, pdMS_TO_TICKS(10)) == pdTRUE) {
+            const char* fanName = (statusMsg.fanId == 1) ? "cooling" : "vent";
+            snprintf(topicBuffer, 64, "home/garden/fan/%s/state", fanName);
+            const char* statePayload = (statusMsg.state) ? "ON" : "OFF";
+            
+            client.publish(topicBuffer, statePayload);
+            ESP_LOGI(TAG_MQTT, "Sent State: %s -> %s", topicBuffer, statePayload);
+        }
+
         vTaskDelay(pdMS_TO_TICKS(10)); 
     }
 }
@@ -420,15 +517,20 @@ void setup() {
     
     initTime();
 
-    // Queue size increased to 100
+    // Queues
     msgQueue = xQueueCreate(100, sizeof(SensorMeasurement));
-    if (msgQueue == NULL) {
+    cmdQueue = xQueueCreate(10, sizeof(FanCommand)); 
+    statusQueue = xQueueCreate(10, sizeof(FanStatus));
+
+    if (msgQueue == NULL || cmdQueue == NULL || statusQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
         while(1); 
     }
 
+    // Start Tasks
     xTaskCreatePinnedToCore(networkTask, "NetTask", 8192, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(sensorControlTask, "SensTask", 6144, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(controlTask, "CtrlTask", 2048, NULL, 1, NULL, 1);
 }
 
 void loop() { vTaskDelete(NULL); }
