@@ -530,7 +530,7 @@ void setup() {
     // Start Tasks
     xTaskCreatePinnedToCore(networkTask, "NetTask", 8192, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(sensorControlTask, "SensTask", 6144, NULL, 1, NULL, 1);
-    xTaskCreatePinnedToCore(controlTask, "CtrlTask", 2048, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(controlTask, "CtrlTask", 4096, NULL, 1, NULL, 1);
 }
 
 void loop() { vTaskDelete(NULL); }
