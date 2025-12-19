@@ -160,6 +160,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (validCommand) {
         if (xQueueSend(cmdQueue, &cmd, 0) != pdTRUE) {
             ESP_LOGE(TAG_MQTT, "Command Queue Full! Dropping command.");
+            // Inform MQTT sender that the command was rejected due to overload
+            client.publish("home/garden/system/error", "CMD_REJECTED_QUEUE_FULL", true);
         }
     }
 }
