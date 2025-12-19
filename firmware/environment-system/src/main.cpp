@@ -192,7 +192,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             // Queue error message instead of publishing directly
             NetworkMessage errMsg;
             errMsg.msgType = ERROR_MSG;
-            strncpy(errMsg.data.errorText, "CMD_QUEUE_FULL", 31);
+            strncpy(errMsg.data.errorText, "CMD_QUEUE_FULL", sizeof(errMsg.data.errorText) - 1);
+            errMsg.data.errorText[sizeof(errMsg.data.errorText) - 1] = '\0';
             if (xQueueSend(msgQueue, &errMsg, 0) != pdTRUE) {
                 ESP_LOGE(TAG_MQTT, "Message Queue Full! Could not enqueue error notification.");
             }
