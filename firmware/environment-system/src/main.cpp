@@ -142,6 +142,12 @@ void printMqttError(int state) {
 
 // MQTT Callback function
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    // Defensive checks for null pointers
+    if (topic == nullptr || payload == nullptr) {
+        ESP_LOGW(TAG_MQTT, "Received MQTT message with null %s",
+                 (topic == nullptr) ? "topic" : "payload");
+        return;
+    }
     // Static buffer to avoid dynamic allocation
     char msg[64];
     unsigned int originalLength = length;
