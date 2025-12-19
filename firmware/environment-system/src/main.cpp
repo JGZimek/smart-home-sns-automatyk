@@ -148,8 +148,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     // Parse Payload
     if (validCommand) {
-        if (msg == "ON") cmd.state = true;
-        else if (msg == "OFF") cmd.state = false;
+        if (msg.equalsIgnoreCase("ON")) cmd.state = true;
+        else if (msg.equalsIgnoreCase("OFF")) cmd.state = false;
         else {
             ESP_LOGW(TAG_MQTT, "Invalid payload: %s", msg.c_str());
             validCommand = false;
