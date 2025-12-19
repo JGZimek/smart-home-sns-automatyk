@@ -62,7 +62,7 @@ const char* mqtt_pass = "esp32";
 // --- DATA STRUCTURES ---
 enum SensorType { TEMP, HUM, PRES, VOLT, CURR, WATT, LIGHT };
 
-// Added MSG_ERROR type to handle errors via queue instead of direct publish from callback
+// Added ERROR_MSG type to handle errors via queue instead of direct publish from callback
 enum MsgType { SENSOR_DATA, FAN_STATUS, ERROR_MSG }; 
 
 struct SensorMeasurement {
