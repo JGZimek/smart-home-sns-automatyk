@@ -540,7 +540,7 @@ void setup() {
     msgQueue = xQueueCreate(100, sizeof(SensorMeasurement));
     // Fan command queue: size 20 to tolerate short bursts of MQTT control commands
     cmdQueue = xQueueCreate(20, sizeof(FanCommand)); 
-    statusQueue = xQueueCreate(10, sizeof(FanStatus));
+    statusQueue = xQueueCreate(20, sizeof(FanStatus));
 
     if (msgQueue == NULL || cmdQueue == NULL || statusQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
