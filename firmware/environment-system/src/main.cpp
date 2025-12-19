@@ -227,6 +227,11 @@ void controlTask(void * parameter) {
     for(;;) {
         // Wait indefinitely for a message
         if (xQueueReceive(cmdQueue, &cmd, portMAX_DELAY) == pdTRUE) {
+            // Validate fanId to prevent unintended behavior on invalid values
+            if (cmd.fanId != 1 && cmd.fanId != 2) {
+                ESP_LOGE(TAG_CTRL, "Received invalid fanId: %d", cmd.fanId);
+                continue;
+            }
             int pin = (cmd.fanId == 1) ? PIN_FAN_COOLING : PIN_FAN_VENT;
             
             // LOGIC INVERSION for Relay Module (Active LOW)
