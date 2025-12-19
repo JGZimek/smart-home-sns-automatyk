@@ -144,9 +144,21 @@ void printMqttError(int state) {
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
     // Static buffer to avoid dynamic allocation
     char msg[64];
-    if (length >= sizeof(msg)) length = sizeof(msg) - 1;
+    unsigned int originalLength = length;
+    bool truncated = false;
+    if (length >= sizeof(msg)) {
+        length = sizeof(msg) - 1;
+        truncated = true;
+    }
     memcpy(msg, payload, length);
     msg[length] = '\0';
+
+    if (truncated) {
+        ESP_LOGW(TAG_MQTT,
+                 "MQTT payload truncated from %u to %u bytes to fit buffer",
+                 originalLength,
+                 length);
+    }
     
     ESP_LOGI(TAG_MQTT, "CMD received: %s -> %s", topic, msg);
 
