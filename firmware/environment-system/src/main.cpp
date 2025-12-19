@@ -175,9 +175,16 @@ void reconnectMqtt() {
             client.publish("home/garden/system/status", "ONLINE");
             
             // Subscribe to control topics
-            client.subscribe("home/garden/fan/cooling/set");
-            client.subscribe("home/garden/fan/vent/set");
-            ESP_LOGI(TAG_MQTT, "Subscribed to fan control topics");
+            bool coolingSubOk = client.subscribe("home/garden/fan/cooling/set");
+            bool ventSubOk    = client.subscribe("home/garden/fan/vent/set");
+            if (coolingSubOk && ventSubOk) {
+                ESP_LOGI(TAG_MQTT, "Subscribed to fan control topics");
+            } else {
+                ESP_LOGE(TAG_MQTT,
+                         "Failed to subscribe to fan control topic(s): cooling=%s, vent=%s",
+                         coolingSubOk ? "OK" : "FAIL",
+                         ventSubOk ? "OK" : "FAIL");
+            }
         } else {
             printMqttError(client.state());
         }
