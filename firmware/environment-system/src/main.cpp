@@ -600,7 +600,6 @@ void setup() {
     // Queues
     msgQueue = xQueueCreate(100, sizeof(NetworkMessage));
     cmdQueue = xQueueCreate(20, sizeof(FanCommand)); 
-    statusQueue = xQueueCreate(20, sizeof(FanStatus));
 
     if (msgQueue == NULL || cmdQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
