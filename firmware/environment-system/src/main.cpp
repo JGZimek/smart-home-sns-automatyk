@@ -519,7 +519,8 @@ void setup() {
 
     // Queues
     msgQueue = xQueueCreate(100, sizeof(SensorMeasurement));
-    cmdQueue = xQueueCreate(10, sizeof(FanCommand)); 
+    // Fan command queue: size 20 to tolerate short bursts of MQTT control commands
+    cmdQueue = xQueueCreate(20, sizeof(FanCommand)); 
     statusQueue = xQueueCreate(10, sizeof(FanStatus));
 
     if (msgQueue == NULL || cmdQueue == NULL || statusQueue == NULL) {
