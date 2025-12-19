@@ -181,7 +181,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             NetworkMessage errMsg;
             errMsg.msgType = ERROR_MSG;
             strncpy(errMsg.data.errorText, "CMD_QUEUE_FULL", 31);
-            xQueueSend(msgQueue, &errMsg, 0); 
+            if (xQueueSend(msgQueue, &errMsg, 0) != pdTRUE) {
+                ESP_LOGE(TAG_MQTT, "Message Queue Full! Could not enqueue error notification.");
+            }
         }
     }
 }
