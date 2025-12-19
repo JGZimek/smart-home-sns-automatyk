@@ -482,8 +482,11 @@ void networkTask(void * parameter) {
             snprintf(topicBuffer, 64, "home/garden/fan/%s/state", fanName);
             const char* statePayload = (statusMsg.state) ? "ON" : "OFF";
             
-            client.publish(topicBuffer, statePayload);
-            ESP_LOGI(TAG_MQTT, "Sent State: %s -> %s", topicBuffer, statePayload);
+            if (client.publish(topicBuffer, statePayload)) {
+                ESP_LOGI(TAG_MQTT, "Sent State: %s -> %s", topicBuffer, statePayload);
+            } else {
+                ESP_LOGE(TAG_MQTT, "Failed to publish State: %s -> %s", topicBuffer, statePayload);
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(10)); 
