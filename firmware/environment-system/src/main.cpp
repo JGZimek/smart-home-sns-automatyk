@@ -31,6 +31,7 @@ static const char* TAG_TIME = "TIME";
 
 // --- SETTINGS ---
 #define SENSOR_INTERVAL 5000
+#define MAX_MQTT_FAILURES 5
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3600;      // UTC+1
 const int   daylightOffset_sec = 3600; // UTC+2 (Summer)
@@ -54,7 +55,7 @@ bool pwr2_connected = false;
 bool tsl_connected = false;
 
 // --- MQTT CONFIG ---
-char mqtt_server[40] = "192.168.1.57";
+char mqtt_server[40] = "192.168.1.60";
 char mqtt_port[6] = "1883";
 const char* mqtt_user = "esp32";
 const char* mqtt_pass = "esp32";
@@ -207,10 +208,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
 }
 
-void reconnectMqtt() {
+bool reconnectMqtt() {
     if (!client.connected()) {
         ESP_LOGI(TAG_MQTT, "Connecting to broker at %s...", mqtt_server);
-        String clientId = "EnvSystem-" + String(random(0xffff), HEX);
+        String clientId = "EnvSystem-" + String(random(0xffff), HEX);        
         if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
             ESP_LOGI(TAG_MQTT, "Connected successfully!");
             client.publish("home/garden/system/status", "ONLINE");
@@ -222,13 +223,17 @@ void reconnectMqtt() {
             if (coolingSubOk && ventSubOk) {
                 ESP_LOGI(TAG_MQTT, "Subscribed to fan control topics");
             } else {
-                ESP_LOGE(TAG_MQTT, "Failed to subscribe to fan control topics. Retrying connection...");
+                ESP_LOGE(TAG_MQTT, "Failed to subscribe. Retrying...");
                 client.disconnect();
+                return false;
             }
+            return true;
         } else {
             printMqttError(client.state());
+            return false;
         }
     }
+    return true;
 }
 
 void initTime() {
@@ -483,6 +488,8 @@ void networkTask(void * parameter) {
     NetworkMessage inMsg;
     char topicBuffer[64];
     char payloadBuffer[128];
+    
+    static int mqtt_failures = 0;
 
     for(;;) {
         if (WiFi.status() != WL_CONNECTED) { 
@@ -491,21 +498,44 @@ void networkTask(void * parameter) {
         }
         
         if (!client.connected()) {
-            reconnectMqtt();
-            if (!client.connected()) { 
-                vTaskDelay(pdMS_TO_TICKS(5000)); 
+            bool success = reconnectMqtt();
+            
+            if (!success) {
+                mqtt_failures++;
+                ESP_LOGE(TAG_MQTT, "MQTT Connect Failed (%d/%d)", mqtt_failures, MAX_MQTT_FAILURES);
+                
+                if (mqtt_failures >= MAX_MQTT_FAILURES) {
+                    ESP_LOGE(TAG_MAIN, "Too many MQTT failures! Configuration is likely wrong.");
+                    ESP_LOGE(TAG_MAIN, "Resetting settings and restarting into AP mode...");
+                    
+                    wm.resetSettings();
+                    
+                    preferences.begin("smarthome", false);
+                    preferences.clear();
+                    preferences.end();
+                    
+                    delay(1000);
+                    ESP.restart();
+                }
+                
+                vTaskDelay(pdMS_TO_TICKS(5000));
                 continue; 
+            } else {
+                if(mqtt_failures > 0) {
+                    ESP_LOGI(TAG_MQTT, "MQTT recovered! Failure counter reset.");
+                }
+                mqtt_failures = 0;
             }
         }
+        
         client.loop(); 
 
         // Process Incoming Messages (Sensors, Fan Status, Errors)
         if (xQueueReceive(msgQueue, &inMsg, pdMS_TO_TICKS(10)) == pdTRUE) {
             
             if (inMsg.msgType == SENSOR_DATA) {
-                // --- TOPIC GENERATION ---
                 if (inMsg.data.sensor.sourceId == 0) {
-                    switch(inMsg.data.sensor.type) {
+                     switch(inMsg.data.sensor.type) {
                         case TEMP: snprintf(topicBuffer, 64, "home/garden/environment/temperature"); break;
                         case HUM:  snprintf(topicBuffer, 64, "home/garden/environment/humidity"); break;
                         case PRES: snprintf(topicBuffer, 64, "home/garden/environment/pressure"); break;
@@ -513,63 +543,32 @@ void networkTask(void * parameter) {
                         default:   snprintf(topicBuffer, 64, "home/garden/environment/log"); break;
                     }
                 } else {
-                    const char* sourceName = "unknown";
-                    if (inMsg.data.sensor.sourceId == 1) sourceName = "solar";
-                    else if (inMsg.data.sensor.sourceId == 2) sourceName = "battery";
-
+                    const char* sourceName = (inMsg.data.sensor.sourceId == 1) ? "solar" : "battery";
                     const char* metric = "unknown";
                     bool validMetric = true;
                     switch(inMsg.data.sensor.type) {
                         case VOLT: metric = "voltage"; break;
                         case CURR: metric = "current"; break;
                         case WATT: metric = "power"; break;
-                        default:
-                            ESP_LOGE(TAG_PWR, "Unsupported type: %d", inMsg.data.sensor.type);
-                            validMetric = false;
-                            break;
+                        default: metric = "error"; break;
                     }
-                    
-                    if (validMetric) {
-                        snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
-                    } else {
-                        snprintf(topicBuffer, 64, "home/garden/power/%s/error", sourceName);
-                    }
+                    snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
                 }
 
-                // Payload formatting
-                if (inMsg.data.sensor.type == WATT || 
-                    inMsg.data.sensor.type == CURR || 
-                    inMsg.data.sensor.type == LIGHT) 
-                {
-                    snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", 
-                             inMsg.data.sensor.value, 
-                             inMsg.data.sensor.timestamp);
+                if (inMsg.data.sensor.type == WATT || inMsg.data.sensor.type == CURR || inMsg.data.sensor.type == LIGHT) {
+                    snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.data.sensor.value, inMsg.data.sensor.timestamp);
                 } else {
-                    snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", 
-                             inMsg.data.sensor.value, 
-                             inMsg.data.sensor.timestamp);
+                    snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.data.sensor.value, inMsg.data.sensor.timestamp);
                 }
-
-                if (client.publish(topicBuffer, payloadBuffer)) {
-                    if (inMsg.data.sensor.type == LIGHT) ESP_LOGI(TAG_MQTT, "Sent Light: %.1f Lux", inMsg.data.sensor.value);
-                }
+                client.publish(topicBuffer, payloadBuffer);
             } 
             else if (inMsg.msgType == FAN_STATUS) {
-                // Process Fan Status Feedback
                 const char* fanName = (inMsg.data.fan.fanId == 1) ? "cooling" : "vent";
                 snprintf(topicBuffer, 64, "home/garden/fan/%s/state", fanName);
-                const char* statePayload = (inMsg.data.fan.state) ? "ON" : "OFF";
-                
-                if (client.publish(topicBuffer, statePayload)) {
-                    ESP_LOGI(TAG_MQTT, "Sent State: %s -> %s", topicBuffer, statePayload);
-                } else {
-                    ESP_LOGE(TAG_MQTT, "Failed to publish State: %s -> %s", topicBuffer, statePayload);
-                }
+                client.publish(topicBuffer, (inMsg.data.fan.state) ? "ON" : "OFF");
             }
             else if (inMsg.msgType == ERROR_MSG) {
-                // Process Error Messages
                 client.publish("home/garden/system/error", inMsg.data.errorText);
-                ESP_LOGE(TAG_MQTT, "Published Error: %s", inMsg.data.errorText);
             }
         }
 
