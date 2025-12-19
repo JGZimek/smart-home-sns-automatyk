@@ -41,12 +41,13 @@ CHECK_INTERVAL = 60  # Check IP every 60 seconds (CPU saving)
 
 def get_ip_address(ifname):
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        return socket.inet_ntoa(fcntl.ioctl(
-            s.fileno(),
-            0x8915,  # SIOCGIFADDR
-            struct.pack('256s', ifname[:15].encode('utf-8'))
-        )[20:24])
+        # Use context manager to ensure socket is closed properly
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            return socket.inet_ntoa(fcntl.ioctl(
+                s.fileno(),
+                0x8915,  # SIOCGIFADDR
+                struct.pack('256s', ifname[:15].encode('utf-8'))
+            )[20:24])
     except (OSError, IOError):
         return None
     except Exception:
