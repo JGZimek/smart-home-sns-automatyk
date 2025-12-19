@@ -250,7 +250,9 @@ void controlTask(void * parameter) {
             
             // Send feedback status to MQTT task
             FanStatus status = { cmd.fanId, cmd.state };
-            xQueueSend(statusQueue, &status, 0);
+            if (xQueueSend(statusQueue, &status, 0) != pdTRUE) {
+                ESP_LOGE(TAG_CTRL, "Failed to enqueue fan status feedback (fanId=%d, state=%d)", cmd.fanId, cmd.state);
+            }
         }
     }
 }
