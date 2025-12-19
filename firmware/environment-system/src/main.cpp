@@ -250,7 +250,7 @@ void controlTask(void * parameter) {
             
             digitalWrite(pin, level);
             
-            const char* fanName = (cmd.fanId == 1) ? "Cooling" : "Vent";
+            const char* fanName = (cmd.fanId == 1) ? "Cooling" : "Ventilation";
             const char* stateStr = (cmd.state) ? "ON" : "OFF";
             
             ESP_LOGI(TAG_CTRL, "Fan %s set to %s (Pin Level: %s)", fanName, stateStr, (level==LOW)?"LOW":"HIGH");
