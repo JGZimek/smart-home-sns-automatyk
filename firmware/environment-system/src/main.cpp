@@ -506,11 +506,11 @@ void networkTask(void * parameter) {
                 // --- TOPIC GENERATION ---
                 if (inMsg.data.sensor.sourceId == 0) {
                     switch(inMsg.data.sensor.type) {
-                        case TEMP: snprintf(topicBuffer, 64, "home/garden/env/temperature"); break;
-                        case HUM:  snprintf(topicBuffer, 64, "home/garden/env/humidity"); break;
-                        case PRES: snprintf(topicBuffer, 64, "home/garden/env/pressure"); break;
-                        case LIGHT: snprintf(topicBuffer, 64, "home/garden/env/light"); break;
-                        default:   snprintf(topicBuffer, 64, "home/garden/env/log"); break;
+                        case TEMP: snprintf(topicBuffer, 64, "home/garden/environment/temperature"); break;
+                        case HUM:  snprintf(topicBuffer, 64, "home/garden/environment/humidity"); break;
+                        case PRES: snprintf(topicBuffer, 64, "home/garden/environment/pressure"); break;
+                        case LIGHT: snprintf(topicBuffer, 64, "home/garden/environment/light"); break;
+                        default:   snprintf(topicBuffer, 64, "home/garden/environment/log"); break;
                     }
                 } else {
                     const char* sourceName = "unknown";
