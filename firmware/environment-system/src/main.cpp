@@ -62,6 +62,9 @@ const char* mqtt_pass = "esp32";
 // --- DATA STRUCTURES ---
 enum SensorType { TEMP, HUM, PRES, VOLT, CURR, WATT, LIGHT };
 
+// Added MSG_ERROR type to handle errors via queue instead of direct publish from callback
+enum MsgType { SENSOR_DATA, FAN_STATUS, ERROR_MSG }; 
+
 struct SensorMeasurement {
     SensorType type;
     uint8_t sourceId; // 0=Env, 1=Solar, 2=Battery
@@ -82,9 +85,18 @@ struct FanStatus {
     bool state;
 };
 
-QueueHandle_t msgQueue; // Sensor data queue
+// Unified structure to handle errors safely in network task
+struct NetworkMessage {
+    MsgType msgType;
+    union {
+        SensorMeasurement sensor;
+        FanStatus fan;
+        char errorText[32];
+    } data;
+};
+
+QueueHandle_t msgQueue; // Sensor data queue (now holds NetworkMessage)
 QueueHandle_t cmdQueue; // Control command queue
-QueueHandle_t statusQueue; // Feedback queue for fan status
 
 // --- HELPER FUNCTIONS ---
 
@@ -129,39 +141,46 @@ void printMqttError(int state) {
 
 // MQTT Callback function
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    String msg;
-    for (int i = 0; i < length; i++) msg += (char)payload[i];
+    // Static buffer to avoid dynamic allocation
+    char msg[64];
+    if (length >= sizeof(msg)) length = sizeof(msg) - 1;
+    memcpy(msg, payload, length);
+    msg[length] = '\0';
     
-    ESP_LOGI(TAG_MQTT, "CMD received: %s -> %s", topic, msg.c_str());
+    ESP_LOGI(TAG_MQTT, "CMD received: %s -> %s", topic, msg);
 
     FanCommand cmd;
     bool validCommand = false;
 
     // Parse Topic - Using meaningful names
-    if (String(topic) == "home/garden/fan/cooling/set") {
+    if (strcmp(topic, "home/garden/fan/cooling/set") == 0) {
         cmd.fanId = 1; // Cooling
         validCommand = true;
-    } else if (String(topic) == "home/garden/fan/vent/set") {
+    } else if (strcmp(topic, "home/garden/fan/vent/set") == 0) {
         cmd.fanId = 2; // Ventilation
         validCommand = true;
     }
 
     // Parse Payload
     if (validCommand) {
-        if (msg == "ON") cmd.state = true;
-        else if (msg == "OFF") cmd.state = false;
+        if (strcmp(msg, "ON") == 0) cmd.state = true;
+        else if (strcmp(msg, "OFF") == 0) cmd.state = false;
         else {
-            ESP_LOGW(TAG_MQTT, "Invalid payload: %s", msg.c_str());
+            ESP_LOGW(TAG_MQTT, "Invalid payload: %s", msg);
             validCommand = false;
         }
     }
 
     // Send to Control Task if valid
     if (validCommand) {
-        if (xQueueSend(cmdQueue, &cmd, 0) != pdTRUE) {
+        if (xQueueSend(cmdQueue, &cmd, pdMS_TO_TICKS(10)) != pdTRUE) {
             ESP_LOGE(TAG_MQTT, "Command Queue Full! Dropping command.");
-            // Inform MQTT sender that the command was rejected due to overload
-            client.publish("home/garden/system/error", "CMD_REJECTED_QUEUE_FULL", true);
+            
+            // Queue error message instead of publishing directly
+            NetworkMessage errMsg;
+            errMsg.msgType = ERROR_MSG;
+            strncpy(errMsg.data.errorText, "CMD_QUEUE_FULL", 31);
+            xQueueSend(msgQueue, &errMsg, 0); 
         }
     }
 }
@@ -174,16 +193,15 @@ void reconnectMqtt() {
             ESP_LOGI(TAG_MQTT, "Connected successfully!");
             client.publish("home/garden/system/status", "ONLINE");
             
-            // Subscribe to control topics
+            // Subscribe to control topics (Meaningful names)
             bool coolingSubOk = client.subscribe("home/garden/fan/cooling/set");
             bool ventSubOk    = client.subscribe("home/garden/fan/vent/set");
+            
             if (coolingSubOk && ventSubOk) {
                 ESP_LOGI(TAG_MQTT, "Subscribed to fan control topics");
             } else {
-                ESP_LOGE(TAG_MQTT,
-                         "Failed to subscribe to fan control topic(s): cooling=%s, vent=%s",
-                         coolingSubOk ? "OK" : "FAIL",
-                         ventSubOk ? "OK" : "FAIL");
+                ESP_LOGE(TAG_MQTT, "Failed to subscribe to fan control topics. Retrying connection...");
+                client.disconnect();
             }
         } else {
             printMqttError(client.state());
@@ -234,13 +252,14 @@ void controlTask(void * parameter) {
     FanCommand cmd;
 
     for(;;) {
-        // Wait indefinitely for a message
-        if (xQueueReceive(cmdQueue, &cmd, portMAX_DELAY) == pdTRUE) {
-            // Validate fanId to prevent unintended behavior on invalid values
+        if (xQueueReceive(cmdQueue, &cmd, pdMS_TO_TICKS(1000)) == pdTRUE) {
+            
+            // Validate fanId
             if (cmd.fanId != 1 && cmd.fanId != 2) {
                 ESP_LOGE(TAG_CTRL, "Received invalid fanId: %d", cmd.fanId);
                 continue;
             }
+
             int pin = (cmd.fanId == 1) ? PIN_FAN_COOLING : PIN_FAN_VENT;
             
             // LOGIC INVERSION for Relay Module (Active LOW)
@@ -256,11 +275,17 @@ void controlTask(void * parameter) {
             ESP_LOGI(TAG_CTRL, "Fan %s set to %s (Pin Level: %s)", fanName, stateStr, (level==LOW)?"LOW":"HIGH");
             
             // Send feedback status to MQTT task
-            FanStatus status = { cmd.fanId, cmd.state };
-            if (xQueueSend(statusQueue, &status, 0) != pdTRUE) {
-                ESP_LOGE(TAG_CTRL, "Failed to enqueue fan status feedback (fanId=%d, state=%d)", cmd.fanId, cmd.state);
+            NetworkMessage netMsg;
+            netMsg.msgType = FAN_STATUS;
+            netMsg.data.fan.fanId = cmd.fanId;
+            netMsg.data.fan.state = cmd.state;
+
+            if (xQueueSend(msgQueue, &netMsg, pdMS_TO_TICKS(10)) != pdTRUE) {
+                ESP_LOGE(TAG_CTRL, "Failed to enqueue fan status feedback");
             }
         }
+        
+        // Task maintenance logic can go here (e.g. stack monitoring)
     }
 }
 
@@ -272,7 +297,6 @@ void sensorControlTask(void * parameter) {
 
     if (!Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL)) {
         ESP_LOGE(TAG_SENS, "Failed to initialize I2C bus on SDA=%d, SCL=%d", PIN_I2C_SDA, PIN_I2C_SCL);
-        // Without a working I2C bus, sensor initialization cannot proceed safely.
         bme_connected  = false;
         tsl_connected  = false;
         pwr1_connected = false;
@@ -333,17 +357,18 @@ void sensorControlTask(void * parameter) {
             if (isnan(temp) || isnan(hum) || isnan(pres)) {
                 ESP_LOGW(TAG_SENS, "Invalid BME280 reading (NaN). Skipping.");
             } else {
-                SensorMeasurement m;
-                m.timestamp = now;
-                m.sourceId = 0; // ID 0 = Environment
+                NetworkMessage m;
+                m.msgType = SENSOR_DATA;
+                m.data.sensor.timestamp = now;
+                m.data.sensor.sourceId = 0; // ID 0 = Environment
 
-                m.type = TEMP; m.value = temp;
+                m.data.sensor.type = TEMP; m.data.sensor.value = temp;
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env TEMP");
                 
-                m.type = HUM; m.value = hum; 
+                m.data.sensor.type = HUM; m.data.sensor.value = hum; 
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env HUM");
 
-                m.type = PRES; m.value = pres; 
+                m.data.sensor.type = PRES; m.data.sensor.value = pres; 
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env PRES");
             }
         }
@@ -359,11 +384,12 @@ void sensorControlTask(void * parameter) {
             } else {
                 float lux = tsl.calculateLux(full, ir);
                 if (!isnan(lux)) {
-                    SensorMeasurement m;
-                    m.timestamp = now;
-                    m.sourceId = 0; // Environment group
-                    m.type = LIGHT; 
-                    m.value = lux;
+                    NetworkMessage m;
+                    m.msgType = SENSOR_DATA;
+                    m.data.sensor.timestamp = now;
+                    m.data.sensor.sourceId = 0; // Environment group
+                    m.data.sensor.type = LIGHT; 
+                    m.data.sensor.value = lux;
                     if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_SENS, "Q Full: Env LIGHT");
                 }
             }
@@ -378,17 +404,18 @@ void sensorControlTask(void * parameter) {
             if (isnan(v) || isnan(c_mA) || isnan(w_mW)) {
                 ESP_LOGW(TAG_PWR, "Invalid INA219 #1 (Solar) reading. Skipping.");
             } else {
-                SensorMeasurement m;
-                m.timestamp = now;
-                m.sourceId = 1;
+                NetworkMessage m;
+                m.msgType = SENSOR_DATA;
+                m.data.sensor.timestamp = now;
+                m.data.sensor.sourceId = 1;
                 
-                m.type = VOLT; m.value = v; 
+                m.data.sensor.type = VOLT; m.data.sensor.value = v; 
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar VOLT");
 
-                m.type = CURR; m.value = c_mA / 1000.0f; // mA -> A
+                m.data.sensor.type = CURR; m.data.sensor.value = c_mA / 1000.0f; // mA -> A
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar CURR");
 
-                m.type = WATT; m.value = w_mW / 1000.0f; // mW -> W
+                m.data.sensor.type = WATT; m.data.sensor.value = w_mW / 1000.0f; // mW -> W
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Solar WATT");
             }
         }
@@ -402,17 +429,18 @@ void sensorControlTask(void * parameter) {
             if (isnan(v) || isnan(c_mA) || isnan(w_mW)) {
                 ESP_LOGW(TAG_PWR, "Invalid INA219 #2 (Battery) reading. Skipping.");
             } else {
-                SensorMeasurement m;
-                m.timestamp = now;
-                m.sourceId = 2;
+                NetworkMessage m;
+                m.msgType = SENSOR_DATA;
+                m.data.sensor.timestamp = now;
+                m.data.sensor.sourceId = 2;
                 
-                m.type = VOLT; m.value = v; 
+                m.data.sensor.type = VOLT; m.data.sensor.value = v; 
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt VOLT");
 
-                m.type = CURR; m.value = c_mA / 1000.0f; // mA -> A
+                m.data.sensor.type = CURR; m.data.sensor.value = c_mA / 1000.0f; // mA -> A
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt CURR");
 
-                m.type = WATT; m.value = w_mW / 1000.0f; // mW -> W
+                m.data.sensor.type = WATT; m.data.sensor.value = w_mW / 1000.0f; // mW -> W
                 if(xQueueSend(msgQueue, &m, pdMS_TO_TICKS(10)) != pdTRUE) ESP_LOGW(TAG_PWR, "Q Full: Batt WATT");
             }
         }
@@ -430,78 +458,96 @@ void networkTask(void * parameter) {
     client.setServer(mqtt_server, 1883);
     client.setCallback(mqttCallback); 
 
-    SensorMeasurement inMsg;
-    FanStatus statusMsg;
+    NetworkMessage inMsg;
     char topicBuffer[64];
     char payloadBuffer[128];
 
     for(;;) {
-        if (WiFi.status() != WL_CONNECTED) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
+        if (WiFi.status() != WL_CONNECTED) { 
+            vTaskDelay(pdMS_TO_TICKS(2000)); 
+            continue; 
+        }
         
         if (!client.connected()) {
             reconnectMqtt();
-            if (!client.connected()) { vTaskDelay(pdMS_TO_TICKS(5000)); continue; }
+            if (!client.connected()) { 
+                vTaskDelay(pdMS_TO_TICKS(5000)); 
+                continue; 
+            }
         }
         client.loop(); 
 
-        // 1. Process Sensor Data
+        // Process Incoming Messages (Sensors, Fan Status, Errors)
         if (xQueueReceive(msgQueue, &inMsg, pdMS_TO_TICKS(10)) == pdTRUE) {
             
-            // --- TOPIC GENERATION ---
-            if (inMsg.sourceId == 0) {
-                switch(inMsg.type) {
-                    case TEMP: snprintf(topicBuffer, 64, "home/garden/environment/temperature"); break;
-                    case HUM:  snprintf(topicBuffer, 64, "home/garden/environment/humidity"); break;
-                    case PRES: snprintf(topicBuffer, 64, "home/garden/environment/pressure"); break;
-                    case LIGHT: snprintf(topicBuffer, 64, "home/garden/environment/light"); break;
-                    default:   snprintf(topicBuffer, 64, "home/garden/environment/log"); break;
-                }
-            } else {
-                const char* sourceName = "unknown";
-                if (inMsg.sourceId == 1) sourceName = "solar";
-                else if (inMsg.sourceId == 2) sourceName = "battery";
-
-                const char* metric = "unknown";
-                bool validMetric = true;
-                switch(inMsg.type) {
-                    case VOLT: metric = "voltage"; break;
-                    case CURR: metric = "current"; break;
-                    case WATT: metric = "power"; break;
-                    default:
-                        ESP_LOGE(TAG_PWR, "Unsupported type: %d", inMsg.type);
-                        validMetric = false;
-                        break;
-                }
-                
-                if (validMetric) {
-                    snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
+            if (inMsg.msgType == SENSOR_DATA) {
+                // --- TOPIC GENERATION ---
+                if (inMsg.data.sensor.sourceId == 0) {
+                    switch(inMsg.data.sensor.type) {
+                        case TEMP: snprintf(topicBuffer, 64, "home/garden/env/temperature"); break;
+                        case HUM:  snprintf(topicBuffer, 64, "home/garden/env/humidity"); break;
+                        case PRES: snprintf(topicBuffer, 64, "home/garden/env/pressure"); break;
+                        case LIGHT: snprintf(topicBuffer, 64, "home/garden/env/light"); break;
+                        default:   snprintf(topicBuffer, 64, "home/garden/env/log"); break;
+                    }
                 } else {
-                    snprintf(topicBuffer, 64, "home/garden/power/%s/error", sourceName);
+                    const char* sourceName = "unknown";
+                    if (inMsg.data.sensor.sourceId == 1) sourceName = "solar";
+                    else if (inMsg.data.sensor.sourceId == 2) sourceName = "battery";
+
+                    const char* metric = "unknown";
+                    bool validMetric = true;
+                    switch(inMsg.data.sensor.type) {
+                        case VOLT: metric = "voltage"; break;
+                        case CURR: metric = "current"; break;
+                        case WATT: metric = "power"; break;
+                        default:
+                            ESP_LOGE(TAG_PWR, "Unsupported type: %d", inMsg.data.sensor.type);
+                            validMetric = false;
+                            break;
+                    }
+                    
+                    if (validMetric) {
+                        snprintf(topicBuffer, 64, "home/garden/power/%s/%s", sourceName, metric);
+                    } else {
+                        snprintf(topicBuffer, 64, "home/garden/power/%s/error", sourceName);
+                    }
+                }
+
+                // Payload formatting
+                if (inMsg.data.sensor.type == WATT || 
+                    inMsg.data.sensor.type == CURR || 
+                    inMsg.data.sensor.type == LIGHT) 
+                {
+                    snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", 
+                             inMsg.data.sensor.value, 
+                             inMsg.data.sensor.timestamp);
+                } else {
+                    snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", 
+                             inMsg.data.sensor.value, 
+                             inMsg.data.sensor.timestamp);
+                }
+
+                if (client.publish(topicBuffer, payloadBuffer)) {
+                    if (inMsg.data.sensor.type == LIGHT) ESP_LOGI(TAG_MQTT, "Sent Light: %.1f Lux", inMsg.data.sensor.value);
+                }
+            } 
+            else if (inMsg.msgType == FAN_STATUS) {
+                // Process Fan Status Feedback
+                const char* fanName = (inMsg.data.fan.fanId == 1) ? "cooling" : "vent";
+                snprintf(topicBuffer, 64, "home/garden/fan/%s/state", fanName);
+                const char* statePayload = (inMsg.data.fan.state) ? "ON" : "OFF";
+                
+                if (client.publish(topicBuffer, statePayload)) {
+                    ESP_LOGI(TAG_MQTT, "Sent State: %s -> %s", topicBuffer, statePayload);
+                } else {
+                    ESP_LOGE(TAG_MQTT, "Failed to publish State: %s -> %s", topicBuffer, statePayload);
                 }
             }
-
-            // Payload formatting
-            if (inMsg.type == WATT || inMsg.type == CURR || inMsg.type == LIGHT) {
-                snprintf(payloadBuffer, 128, "{\"value\": %.4f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
-            } else {
-                snprintf(payloadBuffer, 128, "{\"value\": %.2f, \"ts\": %ld}", inMsg.value, inMsg.timestamp);
-            }
-
-            if (client.publish(topicBuffer, payloadBuffer)) {
-                if (inMsg.type == LIGHT) ESP_LOGI(TAG_MQTT, "Sent Light: %.1f Lux", inMsg.value);
-            }
-        }
-
-        // 2. Process Status Feedback (from Control Task)
-        if (xQueueReceive(statusQueue, &statusMsg, pdMS_TO_TICKS(10)) == pdTRUE) {
-            const char* fanName = (statusMsg.fanId == 1) ? "cooling" : "vent";
-            snprintf(topicBuffer, 64, "home/garden/fan/%s/state", fanName);
-            const char* statePayload = (statusMsg.state) ? "ON" : "OFF";
-            
-            if (client.publish(topicBuffer, statePayload)) {
-                ESP_LOGI(TAG_MQTT, "Sent State: %s -> %s", topicBuffer, statePayload);
-            } else {
-                ESP_LOGE(TAG_MQTT, "Failed to publish State: %s -> %s", topicBuffer, statePayload);
+            else if (inMsg.msgType == ERROR_MSG) {
+                // Process Error Messages
+                client.publish("home/garden/system/error", inMsg.data.errorText);
+                ESP_LOGE(TAG_MQTT, "Published Error: %s", inMsg.data.errorText);
             }
         }
 
@@ -537,12 +583,10 @@ void setup() {
     initTime();
 
     // Queues
-    msgQueue = xQueueCreate(100, sizeof(SensorMeasurement));
-    // Fan command queue: size 20 to tolerate short bursts of MQTT control commands
+    msgQueue = xQueueCreate(100, sizeof(NetworkMessage));
     cmdQueue = xQueueCreate(20, sizeof(FanCommand)); 
-    statusQueue = xQueueCreate(10, sizeof(FanStatus));
 
-    if (msgQueue == NULL || cmdQueue == NULL || statusQueue == NULL) {
+    if (msgQueue == NULL || cmdQueue == NULL) {
         ESP_LOGE(TAG_MAIN, "Queue creation failed!");
         while(1); 
     }
