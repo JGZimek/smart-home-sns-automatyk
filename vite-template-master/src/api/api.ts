@@ -1,0 +1,1 @@
+// todo: tu będzie funkcja z url, potem będziemy modyfikować tylko parametrys
