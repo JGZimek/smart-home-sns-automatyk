@@ -20,3 +20,6 @@ server/mosquitto/config/passwd
 .vscode/
 **/build/
 dist/
+mosquitto/config/passwd
+mosquitto/data/*.db
+mosquitto/log/*.log
