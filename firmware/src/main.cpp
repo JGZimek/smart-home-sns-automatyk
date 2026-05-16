@@ -29,8 +29,34 @@ static const char *TAG_OTA  = "OTA";
 #define BROKER_USER  "esp32"
 #define BROKER_PASS  "esp32"
 
+// ==========================================================
+// DYNAMICZNA SELEKCJA TOPICÓW OTA ORAZ NAZW BLE DLA ERM
+// ==========================================================
+#if defined(MODULE_SECURITY)
+    #define OTA_TOPIC       "home/security/update"
+    #define PROV_BLE_NAME   "PROV_Security"
+    #define MODULE_NAME     "SECURITY SYSTEM"
+#elif defined(MODULE_ACCESS)
+    #define OTA_TOPIC       "home/access/update"
+    #define PROV_BLE_NAME   "PROV_Access"
+    #define MODULE_NAME     "ACCESS SYSTEM"
+#elif defined(MODULE_ENV)
+    #define OTA_TOPIC       "home/environment/update"
+    #define PROV_BLE_NAME   "PROV_Environment"
+    #define MODULE_NAME     "ENVIRONMENT SYSTEM"
+#else
+    #define OTA_TOPIC       "home/system/update"
+    #define PROV_BLE_NAME   "PROV_default"
+    #define MODULE_NAME     "DEFAULT / TEST"
+#endif
+
 static esp_mqtt_client_handle_t mqtt_client;
 static bool mdns_initialized = false;
+
+// --- ZMIENNE POLITYKI AWARYJNEGO PROVISIONINGU ---
+static int s_retry_cnt = 0;
+#define MAX_RETRY_BEFORE_FALLBACK 5
+static bool s_provisioning_active = false;
 
 // ==========================================================
 // 1. SILNIK AKTUALIZACJI BEZPRZEWODOWEJ (HTTP OTA)
@@ -43,7 +69,7 @@ static void ota_update_task(void *pvParameter)
     esp_http_client_config_t config = {};
     config.url = ota_url;
     config.timeout_ms = 8000;
-    config.skip_cert_common_name_check = true; // Dla lokalnych serwerów HTTP
+    config.skip_cert_common_name_check = true; 
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (esp_http_client_open(client, 0) != ESP_OK) {
@@ -53,7 +79,6 @@ static void ota_update_task(void *pvParameter)
     }
     esp_http_client_fetch_headers(client);
 
-    // Znajdujemy wolny bank pamięci (nieaktywny)
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
     ESP_LOGI(TAG_OTA, "Zapisuje firmware do partycji: %s na adresie 0x%lx", update_partition->label, update_partition->address);
 
@@ -64,11 +89,10 @@ static void ota_update_task(void *pvParameter)
     int read_len;
     int total_read = 0;
 
-    // Pętla pobierania strumieniowego binarki i zapisywania we flashu
     while ((read_len = esp_http_client_read(client, ota_buffer, sizeof(ota_buffer))) > 0) {
         esp_ota_write(update_handle, (const void *)ota_buffer, read_len);
         total_read += read_len;
-        if (total_read % 51200 == 0) { // Log co 50 KB progresu
+        if (total_read % 51200 == 0) { 
             ESP_LOGI(TAG_OTA, "Pobrano: %d bajtow...", total_read);
         }
     }
@@ -76,7 +100,6 @@ static void ota_update_task(void *pvParameter)
     ESP_LOGI(TAG_OTA, "Pobieranie zakonczone. Lacznie: %d bajtow. Weryfikacja...", total_read);
 
     if (esp_ota_end(update_handle) == ESP_OK) {
-        // Przełączamy flagę bootloadera na nową partycję!
         if (esp_ota_set_boot_partition(update_partition) == ESP_OK) {
             ESP_LOGW(TAG_OTA, "SUKCES! Aktualizacja zainstalowana poprawnie. Restartuje ESP32...");
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -128,15 +151,14 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG_MQTT, "POMYSLNIE polaczono z dynamicznym Brokerem MQTT!");
-            // Subskrybujemy globalny kanał aktualizacji systemowych
-            esp_mqtt_client_subscribe(client, "home/system/update", 1);
+            // DYNAMICZNA SUBSKRYPCJA: Każda płytka słucha tylko swojego kanału
+            esp_mqtt_client_subscribe(client, OTA_TOPIC, 1);
             esp_mqtt_client_publish(client, "home/system/status", "ONLINE", 0, 1, 0);
             break;
 
         case MQTT_EVENT_DATA:
-            // Sprawdzamy czy przyszła prośba o aktualizację bezprzewodową
-            if (strncmp(event->topic, "home/system/update", event->topic_len) == 0) {
-                // Kopiujemy payload (URL), bo event zniknie po wyjściu z tej funkcji
+            // DYNAMICZNA TRANSMISJA: Sprawdzamy dedykowany kanał zamiast globalnego
+            if (strncmp(event->topic, OTA_TOPIC, event->topic_len) == 0) {
                 char *url_payload = (char *)malloc(event->data_len + 1);
                 snprintf(url_payload, event->data_len + 1, "%.*s", event->data_len, event->data);
                 
@@ -175,18 +197,44 @@ static void mqtt_discovery_task(void *pvParameters)
 }
 
 // ==========================================================
-// 4. OBSŁUGA WIFI I SEKCJE STARTOWE
+// 4. OBSŁUGA WIFI I SEKCJE STARTOWE (Zintegrowany Fallback)
 // ==========================================================
 static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
-    if (event_base == WIFI_PROV_EVENT && event_id == WIFI_PROV_END) {
-        wifi_prov_mgr_deinit();
+    if (event_base == WIFI_PROV_EVENT) {
+        if (event_id == WIFI_PROV_START) {
+            s_provisioning_active = true;
+        } else if (event_id == WIFI_PROV_END) {
+            wifi_prov_mgr_deinit();
+        }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if (!s_provisioning_active) {
+            esp_wifi_connect();
+        }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        s_retry_cnt = 0; 
+        
+        if (!s_provisioning_active) {
+            ESP_LOGI(TAG, "Polaczono automatycznie z pamieci NVS. Zwalniam menedzer BLE.");
+            wifi_prov_mgr_deinit();
+        }
+        
         xTaskCreate(mqtt_discovery_task, "mqtt_discovery_task", 4096, NULL, 3, NULL);
+        
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        esp_wifi_connect();
+        if (!s_provisioning_active) {
+            if (s_retry_cnt < MAX_RETRY_BEFORE_FALLBACK) {
+                s_retry_cnt++;
+                ESP_LOGW(TAG, "Brak polaczenia ze znana siecia Wi-Fi. Proba: %d/%d...", s_retry_cnt, MAX_RETRY_BEFORE_FALLBACK);
+                esp_wifi_connect();
+            } else {
+                ESP_LOGE(TAG, "Makieta stracila dostep do sieci! Uruchamiam awaryjny BLE Provisioning (%s).", PROV_BLE_NAME);
+                s_provisioning_active = true;
+                wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
+                // DYNAMICZNY AWARYJNY START: Podnosi dedykowaną nazwę modułu
+                ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)"smarthome", PROV_BLE_NAME, NULL));
+            }
+        }
     }
 }
 
@@ -211,18 +259,20 @@ static void wifi_init_and_prov(void)
     ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
 
     if (!provisioned) {
+        s_provisioning_active = true;
         wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)"12345678", "PROV_SmartHome", NULL));
+        // DYNAMICZNY START PIERWSZY: Rozgłasza unikalną nazwę środowiska
+        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)"smarthome", PROV_BLE_NAME, NULL));
     } else {
+        ESP_LOGI(TAG_PROV, "Dane Wi-Fi obecne we flashu. Uruchamiam probe polaczenia...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
-        wifi_prov_mgr_deinit();
     }
 }
 
 void setupModule() { 
     ESP_LOGW(TAG, "=============================================");
-    ESP_LOGW(TAG, "Wersja v2.0-ONLINE ");
+    ESP_LOGW(TAG, "Wersja v2.0: Moduł %s ", MODULE_NAME);
     ESP_LOGW(TAG, "=============================================");
 }
 
