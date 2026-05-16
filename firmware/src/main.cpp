@@ -13,14 +13,18 @@
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_ble.h"
 #include "mqtt_client.h"  
-#include "mdns.h"
+#include "mdns.h" 
+
+// --- Biblioteki wymagane do obsługi OTA ---
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
 
 static const char *TAG = "MAIN";
 static const char *TAG_PROV = "PROV";
 static const char *TAG_MQTT = "MQTT";
 static const char *TAG_MDNS = "MDNS";
+static const char *TAG_OTA  = "OTA";
 
-// Nazwa hosta Twojego Raspberry Pi (z logów SSH: rpi-smarthome)
 #define RPI_HOSTNAME "rpi-smarthome"
 #define BROKER_USER  "esp32"
 #define BROKER_PASS  "esp32"
@@ -29,7 +33,69 @@ static esp_mqtt_client_handle_t mqtt_client;
 static bool mdns_initialized = false;
 
 // ==========================================================
-// 1. DYNAMICZNE ODNAJDYWANIE IP MALINKI (mDNS Resolution)
+// 1. SILNIK AKTUALIZACJI BEZPRZEWODOWEJ (HTTP OTA)
+// ==========================================================
+static void ota_update_task(void *pvParameter)
+{
+    char *ota_url = (char *)pvParameter;
+    ESP_LOGW(TAG_OTA, "Rozpoczynam pobieranie aktualizacji z adresu: %s", ota_url);
+
+    esp_http_client_config_t config = {};
+    config.url = ota_url;
+    config.timeout_ms = 8000;
+    config.skip_cert_common_name_check = true; // Dla lokalnych serwerów HTTP
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (esp_http_client_open(client, 0) != ESP_OK) {
+        ESP_LOGE(TAG_OTA, "Blad: Nie mozna otworzyc polaczenia HTTP z serwerem aktualizacji.");
+        free(ota_url);
+        vTaskDelete(NULL);
+    }
+    esp_http_client_fetch_headers(client);
+
+    // Znajdujemy wolny bank pamięci (nieaktywny)
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    ESP_LOGI(TAG_OTA, "Zapisuje firmware do partycji: %s na adresie 0x%lx", update_partition->label, update_partition->address);
+
+    esp_ota_handle_t update_handle = 0;
+    ESP_ERROR_CHECK(esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle));
+
+    char ota_buffer[1024];
+    int read_len;
+    int total_read = 0;
+
+    // Pętla pobierania strumieniowego binarki i zapisywania we flashu
+    while ((read_len = esp_http_client_read(client, ota_buffer, sizeof(ota_buffer))) > 0) {
+        esp_ota_write(update_handle, (const void *)ota_buffer, read_len);
+        total_read += read_len;
+        if (total_read % 51200 == 0) { // Log co 50 KB progresu
+            ESP_LOGI(TAG_OTA, "Pobrano: %d bajtow...", total_read);
+        }
+    }
+
+    ESP_LOGI(TAG_OTA, "Pobieranie zakonczone. Lacznie: %d bajtow. Weryfikacja...", total_read);
+
+    if (esp_ota_end(update_handle) == ESP_OK) {
+        // Przełączamy flagę bootloadera na nową partycję!
+        if (esp_ota_set_boot_partition(update_partition) == ESP_OK) {
+            ESP_LOGW(TAG_OTA, "SUKCES! Aktualizacja zainstalowana poprawnie. Restartuje ESP32...");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_restart();
+        } else {
+            ESP_LOGE(TAG_OTA, "Blad przelaczania partycji startowej.");
+        }
+    } else {
+        ESP_LOGE(TAG_OTA, "Blad: Sprawdzenie sumy kontrolnej pobranego pliku nie powiodlo sie.");
+    }
+
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    free(ota_url);
+    vTaskDelete(NULL);
+}
+
+// ==========================================================
+// 2. DYNAMICZNE ODNAJDYWANIE IP MALINKI (mDNS Resolution)
 // ==========================================================
 static esp_err_t resolve_rpi_ip(char *out_ip_uri, size_t max_len)
 {
@@ -37,34 +103,22 @@ static esp_err_t resolve_rpi_ip(char *out_ip_uri, size_t max_len)
         esp_err_t err = mdns_init();
         if (err == ESP_OK) {
             mdns_initialized = true;
-            // Nadajemy nazwę sieciową temu modułowi ESP32
             mdns_hostname_set("smarthome-node");
-            mdns_instance_name_set("SmartHome ESP32 Node");
         } else {
-            ESP_LOGE(TAG_MDNS, "Blad inicjalizacji mDNS: %d", err);
             return err;
         }
     }
-
-    esp_ip4_addr_t addr;
-    addr.addr = 0;
-
-    ESP_LOGI(TAG_MDNS, "Wyszukiwanie przez mDNS adresu dla: %s.local...", RPI_HOSTNAME);
-    
-    // Odpytanie o rekord typu A (IPv4) z timeoutem 4 sekund
+    esp_ip4_addr_t addr = { .addr = 0 };
     esp_err_t err = mdns_query_a(RPI_HOSTNAME, 4000, &addr);
     if (err == ESP_OK) {
         snprintf(out_ip_uri, max_len, "mqtt://" IPSTR ":1883", IP2STR(&addr));
-        ESP_LOGI(TAG_MDNS, "SUKCES! Odnaleziono ruterem przypisane IP malinki: %s", out_ip_uri);
         return ESP_OK;
-    } else {
-        ESP_LOGE(TAG_MDNS, "mDNS nie odpowiedzial. Nie udalo sie znalezc %s.local.", RPI_HOSTNAME);
-        return ESP_FAIL;
     }
+    return ESP_FAIL;
 }
 
 // ==========================================================
-// 2. OBSŁUGA ZDARZEŃ MQTT
+// 3. OBSŁUGA ZDARZEŃ MQTT
 // ==========================================================
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
@@ -74,17 +128,23 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG_MQTT, "POMYSLNIE polaczono z dynamicznym Brokerem MQTT!");
+            // Subskrybujemy globalny kanał aktualizacji systemowych
+            esp_mqtt_client_subscribe(client, "home/system/update", 1);
             esp_mqtt_client_publish(client, "home/system/status", "ONLINE", 0, 1, 0);
             break;
-        case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGW(TAG_MQTT, "Rozlaczono z Brokerem MQTT. Automatyczny powrot za chwile...");
-            break;
+
         case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG_MQTT, "Otrzymano wiadomosc na temat: %.*s", event->topic_len, event->topic);
+            // Sprawdzamy czy przyszła prośba o aktualizację bezprzewodową
+            if (strncmp(event->topic, "home/system/update", event->topic_len) == 0) {
+                // Kopiujemy payload (URL), bo event zniknie po wyjściu z tej funkcji
+                char *url_payload = (char *)malloc(event->data_len + 1);
+                snprintf(url_payload, event->data_len + 1, "%.*s", event->data_len, event->data);
+                
+                ESP_LOGW(TAG_MQTT, "Otrzymano zadanie OTA z adresem serwera. Tworze bezpieczny watek...");
+                xTaskCreate(ota_update_task, "ota_update_task", 8192, (void *)url_payload, 5, NULL);
+            }
             break;
-        case MQTT_EVENT_ERROR:
-            ESP_LOGE(TAG_MQTT, "Blad polaczenia na warstwie transportowej MQTT.");
-            break;
+            
         default:
             break;
     }
@@ -92,8 +152,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
 static void mqtt_app_start(const char *broker_uri)
 {
-    ESP_LOGI(TAG_MQTT, "Uruchamianie silnika MQTT z adresem URI: %s...", broker_uri);
-    
     esp_mqtt_client_config_t mqtt_cfg = {};
     mqtt_cfg.broker.address.uri = broker_uri;
     mqtt_cfg.credentials.username = BROKER_USER;
@@ -104,56 +162,34 @@ static void mqtt_app_start(const char *broker_uri)
     esp_mqtt_client_start(mqtt_client);
 }
 
-// Zadanie działające w tle, odpytujące mDNS do momentu znalezienia sieci
 static void mqtt_discovery_task(void *pvParameters)
 {
     char dynamic_broker_uri[64];
-    ESP_LOGI(TAG, "Uruchomiono asynchroniczne zadanie namierzania malinki w sieci lokalnej...");
-    
     while (1) {
         if (resolve_rpi_ip(dynamic_broker_uri, sizeof(dynamic_broker_uri)) == ESP_OK) {
             mqtt_app_start(dynamic_broker_uri);
-            vTaskDelete(NULL); // Sukces - wątek sprząta sam siebie i kończy działanie
+            vTaskDelete(NULL); 
         }
-        ESP_LOGW(TAG, "Malinka nie odpowiedziala. Kolejna proba za 5 sekund...");
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
 
 // ==========================================================
-// 3. OBSŁUGA ZDARZEŃ (WIFI I PROVISIONING)
+// 4. OBSŁUGA WIFI I SEKCJE STARTOWE
 // ==========================================================
-static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
-                          int32_t event_id, void* event_data)
+static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
-    if (event_base == WIFI_PROV_EVENT) {
-        if (event_id == WIFI_PROV_START) {
-            ESP_LOGI(TAG_PROV, "===============================================");
-            ESP_LOGI(TAG_PROV, " PROVISIONING AKTYWNY (BLE)!");
-            ESP_LOGI(TAG_PROV, " Nazwa urzadzenia BLE: PROV_SmartHome");
-            ESP_LOGI(TAG_PROV, "===============================================");
-        } else if (event_id == WIFI_PROV_CRED_FAIL) {
-            wifi_prov_mgr_reset_sm_state_on_failure();
-        } else if (event_id == WIFI_PROV_END) {
-            wifi_prov_mgr_deinit();
-        }
+    if (event_base == WIFI_PROV_EVENT && event_id == WIFI_PROV_END) {
+        wifi_prov_mgr_deinit();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "=> SIEC GOTOWA! Uzyskano adres IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        
-        // Odpalamy bezpieczny wątek tła do wykrywania mDNS i startu MQTT
         xTaskCreate(mqtt_discovery_task, "mqtt_discovery_task", 4096, NULL, 3, NULL);
-        
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         esp_wifi_connect();
     }
 }
 
-// ==========================================================
-// 4. INICJALIZACJA WIFI I PROVISIONINGU
-// ==========================================================
 static void wifi_init_and_prov(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
@@ -166,48 +202,31 @@ static void wifi_init_and_prov(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_prov_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_prov_event_handler, NULL));
 
-    // C++ style zero-initialization (Zabezpieczenie przed ostrzeżeniami kompilatora)
     wifi_prov_mgr_config_t config = {};
     config.scheme = wifi_prov_scheme_ble;
     config.scheme_event_handler = WIFI_PROV_EVENT_HANDLER_NONE;
-    
     ESP_ERROR_CHECK(wifi_prov_mgr_init(config));
 
     bool provisioned = false;
     ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
 
     if (!provisioned) {
-        ESP_LOGI(TAG_PROV, "Brak danych WiFi w pamieci. Uruchamiam proces Provisioningu...");
         wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-        const char *pop = "12345678"; 
-        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)pop, "PROV_SmartHome", NULL));
+        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)"12345678", "PROV_SmartHome", NULL));
     } else {
-        ESP_LOGI(TAG_PROV, "Znaleziono konfiguracje WiFi w pamieci. Startuje tryb Station.");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
         wifi_prov_mgr_deinit();
     }
 }
 
-// ==========================================================
-// 5. LOGIKA SPECYFICZNA DLA MODUŁÓW 
-// ==========================================================
-#ifdef MODULE_SECURITY
-void setupModule() { ESP_LOGI(TAG, "Inicjalizacja modulu: SECURITY"); }
-#elif defined(MODULE_ACCESS)
-void setupModule() { ESP_LOGI(TAG, "Inicjalizacja modulu: ACCESS"); }
-#elif defined(MODULE_ENV)
-void setupModule() { ESP_LOGI(TAG, "Inicjalizacja modulu: ENVIRONMENT"); }
-#else
-void setupModule() { ESP_LOGI(TAG, "Inicjalizacja modulu: DEFAULT (Czysty start)"); }
-#endif
+void setupModule() { 
+    ESP_LOGW(TAG, "=============================================");
+    ESP_LOGW(TAG, "Wersja v2.0-ONLINE ");
+    ESP_LOGW(TAG, "=============================================");
+}
 
-// ==========================================================
-// GŁÓWNA FUNKCJA
-// ==========================================================
 extern "C" void app_main() {
-    ESP_LOGI(TAG, "=== Start SmartHome Node (ESP-IDF) ===");
-
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
