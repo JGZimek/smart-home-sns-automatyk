@@ -1,0 +1,9 @@
+paho-mqtt
+psycopg[binary]
+pydantic
+pydantic-settings
+python-dotenv
+fastapi
+uvicorn
+pytest
+httpx
