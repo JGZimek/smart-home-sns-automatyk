@@ -1,0 +1,29 @@
+{
+    "readings": {
+        "latest" : [
+        {
+        "id": 1,
+        "device_id": "esp32_01",
+        "sensor_type": "temperature",
+        "value": 23.6,
+        "unit": "C",
+        "room": "livingroom",
+        "topic": "home/livingroom/temperature",
+        "measured_at": null,
+        "created_at": "2026-05-17T12:30:00"
+        },
+                {
+        "id": 2,
+        "device_id": "esp32_02",
+        "sensor_type": "humidity",
+        "value": 34,
+        "unit": "g/m³",
+        "room": "livingroom",
+        "topic": "home/livingroom/humidity",
+        "measured_at": null,
+        "created_at": "2026-05-17T12:30:00"
+        }
+
+    ]  
+  }
+}
