@@ -12,7 +12,7 @@ export default function Sensors() {
     fetch("http://localhost:3000/readings")
       .then((res) => res.json())
       .then((json) => {
-        setSensor(json.latest);
+        setSensor(json);
       });
   }, []);
 
