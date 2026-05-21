@@ -1,13 +1,17 @@
-import { Card, CardActionArea, CardContent, Typography } from "@mui/material";
+import { Card, CardActionArea, CardContent, styled, Typography } from "@mui/material";
 import { type SensorData } from "../models/SensorData";
 
 interface SensorProps {
   sensor: SensorData;
 }
 
+const CardWrapper = styled(Card)(({ theme }) => ({
+  marginBottom: theme.spacing(1)
+}))
+
 export const SensorCard: React.FC<SensorProps> = ({ sensor }) => {
   return (
-    <Card>
+    <CardWrapper>
       <CardActionArea>
         <CardContent>
           <Typography>
@@ -17,7 +21,7 @@ export const SensorCard: React.FC<SensorProps> = ({ sensor }) => {
           <Typography>Room: {sensor.room}</Typography>
         </CardContent>
       </CardActionArea>
-    </Card>
+    </CardWrapper>
   );
 };
 export default SensorCard;

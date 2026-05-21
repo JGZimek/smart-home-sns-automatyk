@@ -2,15 +2,13 @@ import { Card, CardActionArea, CardMedia, Grid, Typography } from "@mui/material
 import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../Routes";
 import sensorImg from "../assets/sensor.png"
-import gateIcon from "../assets/gate.png"
 import roomsIcon from "../assets/room.png"
 import styled from "@emotion/styled";
+import GateCard from "../components/GateCard";
 
 const GridItem = styled(Grid)(() => ({
   display: "flex",
   justifyContent: "center",
-
-
 }))
 
 export default function MainPage() {
@@ -22,11 +20,6 @@ export default function MainPage() {
       nav: ROUTES.SENSORS,
     },
     {
-      image: gateIcon,
-      text: "Gate",
-      nav: ROUTES.GATE,
-    },
-    {
       image: roomsIcon,
       text: "Rooms",
       nav: ROUTES.ROOMS,
@@ -35,6 +28,9 @@ export default function MainPage() {
   return (
     <>
       <Grid container spacing={1}>
+        <Grid size={12} >
+          <GateCard />
+        </Grid>
         {buttons.map((btn, index) => (
           <GridItem size={6} key={index}>
             <Card sx={{
@@ -42,10 +38,6 @@ export default function MainPage() {
             }}>
               <CardActionArea onClick={() => navigate(btn.nav)}>
                 <CardMedia
-                  sx={{
-                    // height: "50px",
-                    // width: "auto"
-                  }}
                   component="img"
                   image={btn.image} />
                 <Typography>{btn.text}</Typography>
