@@ -2,10 +2,15 @@ import { Card, CardActions, CardContent, CardHeader, FormControlLabel, FormGroup
 import type { Room } from "../pages/Rooms";
 import type { SensorData } from "../models/SensorData";
 import { useEffect, useState } from "react";
+import styled from "@emotion/styled";
 
 interface RoomProps {
     room: Room
 }
+
+const CardWrapper = styled(Card)({
+    marginBottom: 1
+})
 
 export const RoomCard: React.FC<RoomProps> = ({ room }) => {
 
@@ -59,9 +64,7 @@ export const RoomCard: React.FC<RoomProps> = ({ room }) => {
 
 
     return (
-        <Card sx={{
-            marginBottom: 1
-        }}>
+        <CardWrapper>
             <CardHeader title={room.name} />
             <CardContent>
                 {sensors ? (
@@ -102,7 +105,6 @@ export const RoomCard: React.FC<RoomProps> = ({ room }) => {
                                         <Switch
                                             checked={fan.isOn}
                                             onChange={() => handleToggle('fan', fan.id)} />
-
                                     }
                                     label={fan.name}
                                 />
@@ -111,6 +113,6 @@ export const RoomCard: React.FC<RoomProps> = ({ room }) => {
                     </>
                 ) : null}
             </CardActions>
-        </Card>
+        </CardWrapper>
     )
 }

@@ -11,6 +11,11 @@ const GridItem = styled(Grid)(() => ({
   justifyContent: "center",
 }))
 
+const CardWrapper = styled(Card)({
+  padding: "2em"
+
+})
+
 export default function MainPage() {
   const navigate = useNavigate()
   const buttons = [
@@ -33,16 +38,14 @@ export default function MainPage() {
         </Grid>
         {buttons.map((btn, index) => (
           <GridItem size={6} key={index}>
-            <Card sx={{
-              padding: "2em"
-            }}>
+            <CardWrapper>
               <CardActionArea onClick={() => navigate(btn.nav)}>
                 <CardMedia
                   component="img"
                   image={btn.image} />
                 <Typography>{btn.text}</Typography>
               </CardActionArea>
-            </Card>
+            </CardWrapper>
           </GridItem>
         ))}
       </Grid>

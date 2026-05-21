@@ -1,17 +1,32 @@
 import { Box, AppBar, IconButton, Typography, Toolbar } from "@mui/material"
 import logo from '../assets/logo1.png'
 import { useNavigate } from "react-router-dom";
+import styled from "@emotion/styled";
+
+const StyledAppBar = styled(AppBar)({
+    backgroundColor: "lightgray",
+    color: "black"
+})
+
+const StyledToolbar = styled(Toolbar)({
+    display: "flex",
+    gap: "15px",
+    padding: 0
+})
+
+const TextWrapper = styled(Box)({
+    display: "flex",
+    justifyContent: "center",
+    width: "100%",
+})
+
 
 export const TopBar = () => {
     const navigate = useNavigate();
     return (
-        <AppBar
-            position="sticky"
-            sx={{
-                backgroundColor: "lightgray",
-                color: "black"
-            }}>
-            <Toolbar sx={{ display: "flex", gap: "15px", padding: 0 }}>
+        <StyledAppBar
+            position="sticky">
+            <StyledToolbar>
                 <IconButton
                     onClick={() => navigate("/")}
                 >
@@ -24,16 +39,12 @@ export const TopBar = () => {
                         }}
                     />
                 </IconButton>
-                <Box sx={{
-                    display: "flex",
-                    justifyContent: "center",
-                    width: "100%",
-                }}>
+                <TextWrapper>
                     <Typography>Smart Home</Typography>
-                </Box>
-            </Toolbar>
+                </TextWrapper>
+            </StyledToolbar>
 
-        </AppBar>
+        </StyledAppBar>
     )
 }
 

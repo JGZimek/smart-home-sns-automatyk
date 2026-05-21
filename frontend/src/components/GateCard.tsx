@@ -12,6 +12,11 @@ const CardWrapper = styled(Card)(() => ({
     justifyContent: "center"
 }))
 
+const CardImageWrapper = styled(CardMedia)(() => ({
+    height: 30,
+    width: 30
+}))
+
 export const GateCard = () => {
 
     const [gate, setGate] = useState<Gate>()
@@ -46,11 +51,7 @@ export const GateCard = () => {
 
     return (
         <CardWrapper>
-            <CardMedia
-                sx={{
-                    height: 30,
-                    width: 30
-                }}
+            <CardImageWrapper
                 image={gateIcon}
                 title={"Gate image"}
             />
