@@ -6,6 +6,12 @@
 
 #include "module_config.h"
 #include "network_core.h"
+#include "mqtt_core.h" // Upewnij się, że to jest .h, a nie .cpp!
+
+// Dodajemy nagłówek z zadaniem alarmu
+#if defined(MODULE_SECURITY)
+    #include "security_system.h"
+#endif
 
 static const char *TAG = "MAIN";
 
@@ -15,6 +21,7 @@ void setupModule() {
     ESP_LOGW(TAG, "=============================================");
 }
 
+// Główna funkcja wymagan przez ESP-IDF
 extern "C" void app_main() {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -25,7 +32,13 @@ extern "C" void app_main() {
 
     setupModule();
     
+    // Inicjalizacja sieci (WiFi Provisioning), która z kolei uruchomi MQTT
     wifi_init_and_prov();
+
+#if defined(MODULE_SECURITY)
+    // Start sprzętu i logiki dla modułu Security
+    init_security_system();
+#endif
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));
