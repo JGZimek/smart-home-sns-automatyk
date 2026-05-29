@@ -9,9 +9,11 @@
 #include "esp_log.h"
 #include "mqtt_client.h"
 
-// Dołączamy nagłówek security, jeśli kompilujemy ten moduł
+// Dołączamy nagłówki sprzętowe
 #if defined(MODULE_SECURITY)
     #include "security_system.h"
+#elif defined(MODULE_ENV)
+    #include "environment_system.h"
 #endif
 
 static const char *TAG_MQTT = "MQTT";
@@ -35,14 +37,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             esp_mqtt_client_subscribe(client, OTA_TOPIC, 1);
             esp_mqtt_client_publish(client, "home/system/status", "ONLINE", 0, 1, 0);
             
-            // Subskrypcja nasłuchu na uzbrajanie alarmu, jeśli to moduł Security
+            // Subskrypcja nasłuchu sprzętowego zależnie od modułu
             #if defined(MODULE_SECURITY)
-            esp_mqtt_client_subscribe(client, "home/security/arm/set", 1);
+                esp_mqtt_client_subscribe(client, "home/security/arm/set", 1);
+            #elif defined(MODULE_ENV)
+                // Subskrybujemy wszystkie komendy wentylatorów używając wildcarda '+'
+                esp_mqtt_client_subscribe(client, "home/garden/fan/+/set", 1);
             #endif
             break;
 
-        case MQTT_EVENT_DATA:
-            // Logika OTA
+        case MQTT_EVENT_DATA: { // <--- Zaczynamy nowy zakres zmiennych {
+            
+            // 1. Logika OTA
             if (strncmp(event->topic, OTA_TOPIC, event->topic_len) == 0) {
                 char *url_payload = (char *)malloc(event->data_len + 1);
                 snprintf(url_payload, event->data_len + 1, "%.*s", event->data_len, event->data);
@@ -51,17 +57,28 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 xTaskCreate(ota_update_task, "ota_update_task", 8192, (void *)url_payload, 5, NULL);
             }
             
-            // Przekazanie danych do logiki alarmu
-            #if defined(MODULE_SECURITY)
-            char topic_buf[64];
-            char data_buf[128];
-            snprintf(topic_buf, sizeof(topic_buf), "%.*s", event->topic_len, event->topic);
-            snprintf(data_buf, sizeof(data_buf), "%.*s", event->data_len, event->data);
-            
-            // Przekazujemy temat i wiadomość do funkcji w security_system.cpp
-            security_mqtt_callback(topic_buf, data_buf, event->data_len);
+            // 2. Przekazanie danych do logiki sprzętowej
+            #if defined(MODULE_SECURITY) || defined(MODULE_ENV)
+                char topic_buf[64];
+                char data_buf[128];
+                
+                // Zabezpieczenie przed ew. przepełnieniem bufora
+                int t_len = (event->topic_len < sizeof(topic_buf) - 1) ? event->topic_len : sizeof(topic_buf) - 1;
+                int d_len = (event->data_len < sizeof(data_buf) - 1) ? event->data_len : sizeof(data_buf) - 1;
+                
+                snprintf(topic_buf, sizeof(topic_buf), "%.*s", t_len, event->topic);
+                snprintf(data_buf, sizeof(data_buf), "%.*s", d_len, event->data);
+                
+                // Wywołanie właściwego callbacka
+                #if defined(MODULE_SECURITY)
+                    security_mqtt_callback(topic_buf, data_buf, event->data_len);
+                #elif defined(MODULE_ENV)
+                    environment_mqtt_callback(topic_buf, data_buf, event->data_len);
+                #endif
             #endif
+            
             break;
+        } // <--- Koniec zakresu dla case MQTT_EVENT_DATA
             
         default:
             break;

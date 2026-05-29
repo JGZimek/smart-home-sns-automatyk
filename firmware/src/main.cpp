@@ -6,11 +6,13 @@
 
 #include "module_config.h"
 #include "network_core.h"
-#include "mqtt_core.h" // Upewnij się, że to jest .h, a nie .cpp!
+#include "mqtt_core.h"
 
-// Dodajemy nagłówek z zadaniem alarmu
+// Dodajemy nagłówki zależne od wybranego środowiska
 #if defined(MODULE_SECURITY)
     #include "security_system.h"
+#elif defined(MODULE_ENV)
+    #include "environment_system.h"
 #endif
 
 static const char *TAG = "MAIN";
@@ -35,9 +37,11 @@ extern "C" void app_main() {
     // Inicjalizacja sieci (WiFi Provisioning), która z kolei uruchomi MQTT
     wifi_init_and_prov();
 
+    // Start sprzętu i logiki dla wybranej platformy
 #if defined(MODULE_SECURITY)
-    // Start sprzętu i logiki dla modułu Security
     init_security_system();
+#elif defined(MODULE_ENV)
+    init_environment_system();
 #endif
 
     while (1) {
