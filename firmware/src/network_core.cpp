@@ -18,7 +18,7 @@
 #include "esp_http_client.h"
 
 static const char *TAG_PROV = "PROV";
-static const char *TAG_MDNS = "MDNS";
+// static const char *TAG_MDNS = "MDNS";
 static const char *TAG_OTA  = "OTA";
 
 static bool mdns_initialized = false;
