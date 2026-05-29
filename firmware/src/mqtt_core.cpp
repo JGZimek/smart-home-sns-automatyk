@@ -14,6 +14,8 @@
     #include "security_system.h"
 #elif defined(MODULE_ENV)
     #include "environment_system.h"
+#elif defined(MODULE_ACCESS)
+    #include "access_system.h"
 #endif
 
 static const char *TAG_MQTT = "MQTT";
@@ -41,12 +43,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             #if defined(MODULE_SECURITY)
                 esp_mqtt_client_subscribe(client, "home/security/arm/set", 1);
             #elif defined(MODULE_ENV)
-                // Subskrybujemy wszystkie komendy wentylatorów używając wildcarda '+'
                 esp_mqtt_client_subscribe(client, "home/garden/fan/+/set", 1);
+            #elif defined(MODULE_ACCESS)
+                esp_mqtt_client_subscribe(client, "home/access/door/set", 1);
             #endif
             break;
 
-        case MQTT_EVENT_DATA: { // <--- Zaczynamy nowy zakres zmiennych {
+        case MQTT_EVENT_DATA: { 
             
             // 1. Logika OTA
             if (strncmp(event->topic, OTA_TOPIC, event->topic_len) == 0) {
@@ -58,7 +61,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             }
             
             // 2. Przekazanie danych do logiki sprzętowej
-            #if defined(MODULE_SECURITY) || defined(MODULE_ENV)
+            #if defined(MODULE_SECURITY) || defined(MODULE_ENV) || defined(MODULE_ACCESS)
                 char topic_buf[64];
                 char data_buf[128];
                 
@@ -74,11 +77,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                     security_mqtt_callback(topic_buf, data_buf, event->data_len);
                 #elif defined(MODULE_ENV)
                     environment_mqtt_callback(topic_buf, data_buf, event->data_len);
+                #elif defined(MODULE_ACCESS)
+                    access_mqtt_callback(topic_buf, data_buf, event->data_len);
                 #endif
             #endif
             
             break;
-        } // <--- Koniec zakresu dla case MQTT_EVENT_DATA
+        } 
             
         default:
             break;

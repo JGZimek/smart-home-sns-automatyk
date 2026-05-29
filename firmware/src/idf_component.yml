@@ -2,3 +2,4 @@ dependencies:
   idf: ">=5.0"
   espressif/mdns: "^1.2.4"
   esp-idf-lib/bmp280: "*"
+  abobija/rc522: "^2.6.0"

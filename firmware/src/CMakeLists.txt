@@ -3,5 +3,6 @@ idf_component_register(SRCS "main.cpp"
                             "mqtt_core.cpp"
                             "security_system.cpp"
                             "environment_system.cpp"
+                            "access_system.cpp"
                      INCLUDE_DIRS "../include"
                      REQUIRES mdns)

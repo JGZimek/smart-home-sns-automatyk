@@ -13,6 +13,8 @@
     #include "security_system.h"
 #elif defined(MODULE_ENV)
     #include "environment_system.h"
+#elif defined(MODULE_ACCESS)
+    #include "access_system.h"
 #endif
 
 static const char *TAG = "MAIN";
@@ -42,6 +44,8 @@ extern "C" void app_main() {
     init_security_system();
 #elif defined(MODULE_ENV)
     init_environment_system();
+#elif defined(MODULE_ACCESS)
+    init_access_system();
 #endif
 
     while (1) {
