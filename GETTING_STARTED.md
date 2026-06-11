@@ -108,6 +108,7 @@ mosquitto_sub -h rpi-smarthome.local -u esp32 -P esp32 -t 'home/#' -v
 
 Powinieneś zobaczyć m.in.:
 ```
+home/system/server/availability ONLINE        # sam serwer RPi (publikuje go smarthome-node-monitor)
 home/security/availability ONLINE
 home/security/info {"id":"esp32-...","kind":"security",...}
 home/access/availability ONLINE
@@ -117,6 +118,10 @@ home/<rodzaj>/diag {"uptime_s":...,"rssi":...}
 ```
 
 Jeśli widzisz `ONLINE` i `info` dla wszystkich trzech modułów — **makieta działa**.
+
+> Prościej: `smarthome status` (podsumowanie) i `smarthome nodes` (tabela węzłów), albo dashboard
+> `http://rpi-smarthome.local:8080` — pokazują te same dane bez ręcznej subskrypcji. Pełny kontrakt
+> (w tym węzeł serwera `home/system/server/*`): [firmware/MQTT_API.md](firmware/MQTT_API.md).
 
 ---
 

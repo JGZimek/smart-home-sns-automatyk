@@ -45,7 +45,7 @@ Najważniejsze: `BROKER_USER/PASS`, `WEB_PORT`, `EXPECTED_KINDS`, `AP_*` (awaryj
 smarthome status              # broker, usługi, temperatura, zram, IP, Tailscale, liczba węzłów
 smarthome nodes               # tabela węzłów ESP + ich zdrowie (online/stale/offline/missing)
 smarthome cmd <kind> <komenda>  # reboot | reset_wifi | identify | diag | ping  -> home/<kind>/cmd
-smarthome ota <kind> <url>    # zdalny OTA: URL do firmware.bin  -> home/<kind>/update
+smarthome ota <kind> <plik|url>   # zdalny OTA: plik .bin hostowany na Pi lub gotowy URL -> home/<kind>/update
 smarthome set <topic> <payload>   # surowa publikacja (np. home/access/door/set OPEN)
 smarthome watch [topic]       # podgląd ruchu MQTT (domyślnie home/#)
 smarthome logs <usługa>       # monitor | wifi | lcd | health | broker
@@ -67,6 +67,14 @@ Usługa **`smarthome-node-monitor`** subskrybuje `home/+/{info,availability,diag
 
 Monitor publikuje też zdrowie samego Pi jako węzeł `home/system/server/*` – backend widzi serwer tak samo
 jak płytki ESP.
+
+## Zdalny OTA (hosting firmware na Pi)
+
+Ten sam serwer HTTP hostuje obrazy firmware dla aktualizacji OTA: pliki z `/var/lib/smarthome/firmware/`
+są serwowane pod **`http://rpi-smarthome.local:8080/firmware/<nazwa>`**. Dzięki temu OTA jest w pełni zdalny –
+`smarthome ota <kind> <plik.bin>` kopiuje obraz, buduje URL po IP LAN Pi i publikuje go na `home/<kind>/update`,
+a ESP pobiera firmware lokalnie z Pi. Pełna procedura (w tym GitHub Actions przez Tailscale):
+[firmware/OTA_UPDATE.md](../firmware/OTA_UPDATE.md).
 
 ## Mechanizmy odpornościowe (fallbacki)
 

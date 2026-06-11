@@ -29,4 +29,7 @@ mosquitto/log/
 # --- SERWER RPI (skrypty) ---
 # virtualenv uslug Pythona budowany lokalnie na Pi
 scripts/.venv/
+# artefakty kompilacji Pythona
+__pycache__/
+*.pyc
 # realna konfiguracja serwera trzymana jest w /etc/smarthome/ na urzadzeniu

@@ -36,6 +36,8 @@ WEB_ENABLE = os.environ.get("WEB_ENABLE", "1") == "1"
 WEB_PORT = int(os.environ.get("WEB_PORT", "8080"))
 HOSTNAME = os.environ.get("HOSTNAME", socket.gethostname())
 STATE_FILE = os.environ.get("STATE_FILE", "/var/lib/smarthome/nodes.json")
+# Katalog z plikami firmware serwowanymi po HTTP dla OTA (ESP pobiera stad firmware.bin).
+FIRMWARE_DIR = os.environ.get("FIRMWARE_DIR", "/var/lib/smarthome/firmware")
 SERVER_KIND = "system"  # Pi publikuje sie jako home/system/server/*
 
 HEALTH_INTERVAL_S = 30  # jak czesto publikujemy zdrowie Pi (jak ESP diag)
@@ -326,10 +328,34 @@ class Handler(BaseHTTPRequestHandler):
                        "application/json; charset=utf-8")
         elif self.path.startswith("/healthz"):
             self._send(200, "ok\n", "text/plain")
+        elif self.path.startswith("/firmware/"):
+            self._serve_firmware()
         elif self.path == "/" or self.path.startswith("/index"):
             self._send(200, render_dashboard())
         else:
             self._send(404, "not found\n", "text/plain")
+
+    def _serve_firmware(self):
+        # Serwuje plik .bin dla OTA. Zabezpieczone przed path traversal.
+        name = os.path.basename(self.path[len("/firmware/"):].split("?", 1)[0])
+        path = os.path.join(FIRMWARE_DIR, name)
+        if not name or not os.path.isfile(path):
+            self._send(404, "firmware not found\n", "text/plain")
+            return
+        try:
+            size = os.path.getsize(path)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            with open(path, "rb") as f:
+                while True:
+                    chunk = f.read(8192)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except Exception as e:
+            log("Blad serwowania firmware %s: %s" % (name, e))
 
     def log_message(self, *args):
         pass  # cisza – nie zasmiecaj journala

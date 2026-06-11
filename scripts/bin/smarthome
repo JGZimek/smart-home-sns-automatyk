@@ -23,6 +23,17 @@ NODES_JSON="$STATE_DIR/nodes.json"
 mq_pub() { mosquitto_pub -h "$B_HOST" -p "$B_PORT" -u "$B_USER" -P "$B_PASS" "$@"; }
 mq_sub() { mosquitto_sub -h "$B_HOST" -p "$B_PORT" -u "$B_USER" -P "$B_PASS" "$@"; }
 
+# IP serwera w sieci LAN (osiagalny dla ESP). Najpierw zrodlo trasy domyslnej,
+# potem fallback na hostname -I z odfiltrowaniem docker (172.16-31.*) i tailscale (100.*).
+lan_ip() {
+  local ip
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+  if [ -z "$ip" ]; then
+    ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^(127\.|100\.|172\.(1[6-9]|2[0-9]|3[01])\.)' | head -n1)"
+  fi
+  printf '%s' "$ip"
+}
+
 usage() {
   cat <<EOF
 smarthome – zarzadzanie serwerem Smart Home i wezlami ESP
@@ -30,7 +41,7 @@ smarthome – zarzadzanie serwerem Smart Home i wezlami ESP
   smarthome status                 Stan serwera (broker, uslugi, temp, siec, Tailscale)
   smarthome nodes                  Lista wezlow ESP i ich zdrowie (z monitora)
   smarthome cmd <kind> <komenda>   Komenda do wezla: reboot|reset_wifi|identify|diag|ping
-  smarthome ota <kind> <url>       Zdalna aktualizacja firmware (URL do firmware.bin)
+  smarthome ota <kind> <plik|url>  Zdalny OTA: plik .bin (hostowany na Pi) lub gotowy URL
   smarthome set <topic> <payload>  Surowa publikacja MQTT (np. sterowanie aktuatorem)
   smarthome watch [topic]          Podglad ruchu MQTT (domyslnie home/#)
   smarthome logs [usluga]          Logi: monitor|wifi|lcd|health|broker (domyslnie monitor)
@@ -110,11 +121,34 @@ cmd_cmd() {
 }
 
 cmd_ota() {
-  local kind="${1:-}" url="${2:-}"
-  [ -z "$kind" ] || [ -z "$url" ] && die "Uzycie: smarthome ota <kind> <url-do-firmware.bin>"
+  local kind="${1:-}" src="${2:-}"
+  { [ -z "$kind" ] || [ -z "$src" ]; } && \
+    die "Uzycie: smarthome ota <kind> <plik.bin | http://url/firmware.bin>"
+
+  local url
+  if [[ "$src" =~ ^https?:// ]]; then
+    # Podano gotowy URL – publikujemy bez kopiowania (ESP pobiera HTTP-em).
+    url="$src"
+  else
+    # Podano plik lokalny – hostujemy go na Pi i budujemy URL do pobrania przez ESP.
+    [ -f "$src" ] || die "Plik nie istnieje: $src"
+    local fw_dir="$STATE_DIR/firmware"
+    local name; name="$(basename "$src")"
+    local ip; ip="$(lan_ip)"
+    [ -n "$ip" ] || die "Nie moge ustalic IP LAN serwera. Podaj URL recznie: smarthome ota $kind http://<ip>:${WEB_PORT:-8080}/firmware/$name"
+    mkdir -p "$fw_dir" 2>/dev/null || true
+    if ! cp -f "$src" "$fw_dir/$name" 2>/dev/null; then
+      die "Brak praw zapisu do $fw_dir. Uruchom: sudo smarthome ota $kind $src (lub dodaj sie do grupy 'smarthome')."
+    fi
+    chmod 0644 "$fw_dir/$name" 2>/dev/null || true
+    # ESP pobiera po IP (nie .local) – pewne dla klienta HTTP w firmware.
+    url="http://${ip}:${WEB_PORT:-8080}/firmware/${name}"
+    log "Hostuje firmware: $fw_dir/$name  ->  $url"
+  fi
+
   log "Wysylam OTA do home/$kind/update : $url"
   mq_pub -t "home/$kind/update" -m "$url"
-  ok "Wyslano. Sledz postep: smarthome logs broker / smarthome watch home/$kind/#"
+  ok "Wyslano. Sledz postep: smarthome logs broker  /  smarthome watch 'home/$kind/#'"
 }
 
 cmd_set() {

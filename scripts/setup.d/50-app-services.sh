@@ -15,6 +15,11 @@ done
 # Stan (nodes.json) musi byc zapisywalny przez usluge.
 mkdir -p "$STATE_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
+# Katalog firmware dla OTA (serwowany po HTTP). setgid -> pliki dziedzicza grupe,
+# zeby operator z grupy 'smarthome' mogl tu wgrywac binarki bez sudo.
+mkdir -p "$STATE_DIR/firmware"
+chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR/firmware"
+chmod 2775 "$STATE_DIR/firmware"
 
 # --- 2. Virtualenv z zaleznosciami Pythona ---
 if [ ! -x "$VENV_DIR/bin/python" ]; then

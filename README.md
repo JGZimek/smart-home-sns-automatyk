@@ -18,7 +18,8 @@ Projekt jest tak zaprojektowany, by był **plug-and-play**: po jednorazowej konf
         ┌─────────────────────────────────────────────────────────┐
         │   Raspberry Pi Zero 2W   →   rpi-smarthome.local          │
         │   • Broker MQTT (Mosquitto)  port 1883  +  9001 (WS)      │
-        │   • skrypty: wyświetlacz LCD, awaryjny Access Point Wi-Fi │
+        │   • mDNS · monitor węzłów + dashboard · CLI `smarthome`   │
+        │   • fallbacki (AP Wi-Fi, watchdog) · Tailscale (zdalnie)  │
         └─────────────────────────────────────────────────────────┘
                                    │  MQTT
                        ┌───────────────────────────┐
@@ -65,7 +66,7 @@ Wybierz według tego, **co chcesz zrobić**:
 
 1. **Serwer (RPi):** uruchom brokera MQTT i nadaj Pi nazwę `rpi-smarthome` → [GETTING_STARTED.md](GETTING_STARTED.md#1-serwer-raspberry-pi).
 2. **Moduły (ESP32):** wgraj firmware (jeśli nie wgrane) i skonfiguruj Wi-Fi przez aplikację BLE → [GETTING_STARTED.md](GETTING_STARTED.md#3-konfiguracja-wi-fi-w-modułach-ble).
-3. **Sprawdź:** `mosquitto_sub -t 'home/#' -v` powinno pokazać moduły zgłaszające się jako `ONLINE`.
+3. **Sprawdź:** `smarthome status` / dashboard `http://rpi-smarthome.local:8080` (lub `mosquitto_sub -t 'home/#' -v`) powinny pokazać moduły zgłaszające się jako `ONLINE`.
 
 Pełna instrukcja krok po kroku: **[GETTING_STARTED.md](GETTING_STARTED.md)**.
 

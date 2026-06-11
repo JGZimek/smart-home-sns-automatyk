@@ -21,7 +21,7 @@ Dokument dla osoby piszącej backend/frontend sterujący makietą. Opisuje **wsz
 
 ## 2. Przestrzeń nazw i konwencje
 
-- Baza każdego węzła: **`home/<rodzaj>`**, gdzie `<rodzaj>` ∈ `security`, `access`, `environment`, `system` (profil testowy).
+- Baza każdego węzła: **`home/<rodzaj>`**, gdzie `<rodzaj>` ∈ `security`, `access`, `environment`, `system`. Pod `system` mieszczą się: profil testowy ESP32 (`home/system/info`…) oraz **serwer Raspberry Pi**, który zgłasza się jako węzeł pod `home/system/server/...` (patrz [§6a](#6a-węzeł-serwera-raspberry-pi)).
 - **Kierunek** w tabelach jest z punktu widzenia ESP32: `pub` = ESP publikuje (backend subskrybuje), `sub` = ESP nasłuchuje (backend publikuje, żeby sterować).
 - **Retained** (zachowane na brokerze) używane dla stanów, które backend powinien znać natychmiast po starcie (availability, info, stany aktuatorów, ostatni alarm). Zdarzenia chwilowe (ruch, naciśnięcie klawisza, telemetria) nie są retained.
 - Payloady stanów/telemetrii to **JSON**; proste komendy/stany aktuatorów bywają zwykłym tekstem (`ON`, `OPEN`, `ARM`).
@@ -127,6 +127,20 @@ Kontrola dostępu. Kod: `src/access_system.cpp`.
 
 ---
 
+## 6a. Węzeł serwera (Raspberry Pi)
+
+To **nie firmware**, lecz serwer RPi — ale w MQTT zachowuje się jak każdy inny węzeł, więc backend wykrywa go tą samą drogą (`home/+/info`). Publikuje go usługa `smarthome-node-monitor` (Bash/Python na Pi, patrz [scripts/README.md](../scripts/README.md)). Dzięki temu zdrowie serwera widać tak samo jak zdrowie ESP-ek.
+
+| Temat | Kier. | Retained | Payload / przykład |
+| :---- | :---- | :------- | :----------------- |
+| `home/system/server/info` | pub | ✅ | `{"id":"rpi-rpi-smarthome","kind":"system","name":"Smart Home Server (RPi)","role":"broker+monitor","host":"rpi-smarthome"}` |
+| `home/system/server/availability` | pub | ✅ | `ONLINE` / `OFFLINE` (`OFFLINE` jako Last Will, gdy monitor padnie) |
+| `home/system/server/diag` | pub | ❌ | co ~30 s: `{"uptime_s":...,"host_uptime_s":...,"cpu_temp_c":47.1,"mem_total_mb":480,"mem_avail_mb":260,"ip":"192.168.1.10","tailscale_ip":"100.x.y.z","ts":"2026-06-11T10:00:00+00:00"}` |
+
+> Serwer **agreguje** też stan wszystkich węzłów do `/var/lib/smarthome/nodes.json` i wystawia go jako dashboard HTTP (`http://rpi-smarthome.local:8080`, JSON pod `/api/nodes`). To wygodna alternatywa dla samodzielnej subskrypcji `home/+/diag` po stronie backendu.
+
+---
+
 ## 7. Typowy scenariusz integracji
 
 1. **Połącz** się z brokerem (`rpi-smarthome.local:1883`, `esp32`/`esp32`).
@@ -155,6 +169,8 @@ mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/access/door/set -
 mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/environment/cmd -m diag
 mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/security/cmd -m reboot
 ```
+
+> **Z poziomu samego Pi** te same operacje upraszcza CLI `smarthome` (cienka nakładka na powyższe tematy): `smarthome nodes`, `smarthome cmd security reboot`, `smarthome ota environment <url>`, `smarthome set home/access/door/set OPEN`. Szczegóły: [scripts/README.md](../scripts/README.md).
 
 ---
 
@@ -197,4 +213,9 @@ home/access/door/set          sub             OPEN
 home/access/door/state        pub  retained   OPEN | CLOSED
 home/access/rfid              pub             {"uid":"<serial>"}
 home/access/keypad            pub             {"key":"<znak>"}
+
+# SERWER (Raspberry Pi – publikowane przez smarthome-node-monitor)
+home/system/server/info           pub retained JSON tożsamości serwera
+home/system/server/availability   pub retained ONLINE | OFFLINE
+home/system/server/diag           pub          JSON zdrowia Pi (~30 s)
 ```
