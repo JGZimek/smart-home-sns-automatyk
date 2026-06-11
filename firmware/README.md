@@ -102,5 +102,7 @@ Logika wspólna dla wszystkich modułów: [src/device_core.cpp](src/device_core.
 
 ## Dokumentacja powiązana
 
+- [HARDWARE.md](HARDWARE.md) – **pinout i instrukcja podłączenia** czujników/aktuatorów do każdej płytki ESP32.
+- [MQTT_API.md](MQTT_API.md) – **kontrakt komunikacyjny MQTT dla backendu/frontendu** (wszystkie tematy, payloady, sterowanie).
 - [WIFI_PROVISIONING.md](WIFI_PROVISIONING.md) – pierwsza konfiguracja Wi-Fi przez aplikację ESP BLE Provisioning.
 - [OTA_UPDATE.md](OTA_UPDATE.md) – zdalna aktualizacja firmware przez MQTT + HTTP.

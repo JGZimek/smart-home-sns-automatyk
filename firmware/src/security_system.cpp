@@ -75,7 +75,9 @@ static void security_task(void *pvParameters) {
         // 2. Czujnik płomienia – zawsze aktywny (stan niski = płomień)
         bool fire = gpio_get_level(PIN_FLAME) == 0;
         if (fire != prev_fire) {
-            ESP_LOGE(TAG_SEC, fire ? "FIRE DETECTED!" : "Fire cleared");
+            // Uwaga: format ESP_LOGx musi być literałem (makro skleja go z sąsiednimi stringami).
+            if (fire) ESP_LOGE(TAG_SEC, "FIRE DETECTED!");
+            else      ESP_LOGI(TAG_SEC, "Fire cleared");
             mqtt_publish("home/security/fire", fire ? "{\"val\": 1}" : "{\"val\": 0}", 1, 1);
             prev_fire = fire;
         }
@@ -86,7 +88,8 @@ static void security_task(void *pvParameters) {
         if (adc_oneshot_read(adc1_handle, ADC_CHANNEL_6, &gasValue) == ESP_OK) {
             bool gas = gasValue > GAS_THRESHOLD;
             if (gas != prev_gas) {
-                ESP_LOGE(TAG_SEC, gas ? "GAS LEAK! Level: %d" : "Gas cleared (%d)", gasValue);
+                if (gas) ESP_LOGE(TAG_SEC, "GAS LEAK! Level: %d", gasValue);
+                else     ESP_LOGI(TAG_SEC, "Gas cleared (%d)", gasValue);
                 char payload[32];
                 snprintf(payload, sizeof(payload), "{\"val\": %d}", gasValue);
                 mqtt_publish("home/security/gas", payload, 1, 1);

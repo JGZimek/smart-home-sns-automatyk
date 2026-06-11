@@ -27,7 +27,7 @@ static esp_mqtt_client_handle_t mqtt_client = NULL; // Zainicjowane jako NULL
 // nieudanych prób niszczymy klienta i ponawiamy wyszukiwanie przez mDNS.
 #define MQTT_MAX_FAILS_BEFORE_REDISCOVER 10
 static TaskHandle_t s_reconnect_task = NULL;
-static volatile int s_mqtt_fail_cnt = 0;
+static int s_mqtt_fail_cnt = 0;  // dostęp wyłącznie z wątku zdarzeń MQTT
 
 // Teardown wykonywany POZA wątkiem zdarzeń MQTT (nie wolno niszczyć klienta
 // z jego własnego callbacku).
