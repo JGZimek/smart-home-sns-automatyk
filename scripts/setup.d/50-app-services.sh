@@ -47,13 +47,19 @@ ok "Usluga monitora wezlow aktywna."
 systemctl enable --now smarthome-health.timer
 ok "Timer health (watchdog brokera) aktywny."
 
-# AP fallback – tylko gdy wlaczony w konfiguracji
-if [ "${AP_FALLBACK_ENABLE:-1}" = "1" ]; then
+# AP fallback – tylko gdy SWIADOMIE wlaczony (wymaga NetworkManager na wlan0).
+if [ "${AP_FALLBACK_ENABLE:-0}" = "1" ]; then
+  if ! have nmcli; then
+    warn "AP fallback wymaga NetworkManager – instaluje pakiet."
+    warn "Jesli laczysz sie przez Wi-Fi pod networkd, NAJPIERW zmigruj sie do NM (Etap 3.5)!"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq network-manager || \
+      warn "Instalacja network-manager nie powiodla sie."
+  fi
   systemctl enable --now smarthome-wifi-fallback.service
   ok "Awaryjny Access Point Wi-Fi aktywny (SSID: ${AP_SSID:-SmartHome-Config})."
 else
   systemctl disable --now smarthome-wifi-fallback.service >/dev/null 2>&1 || true
-  log "AP fallback wylaczony w konfiguracji (AP_FALLBACK_ENABLE=0)."
+  log "AP fallback wylaczony (AP_FALLBACK_ENABLE=0) – domyslnie. Wlacz po migracji Wi-Fi do NM."
 fi
 
 # LCD – auto-detekcja / wymuszenie / wylaczenie

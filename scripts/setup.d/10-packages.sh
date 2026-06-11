@@ -9,11 +9,15 @@ apt-get update -qq
 
 # Pakiety z repo Ubuntu. NIE instalujemy mosquitto-server (broker chodzi w Dockerze),
 # ale mosquitto-clients sa potrzebne dla CLI 'smarthome' i healthcheckow.
+# UWAGA: NIE instalujemy tu network-manager. Na Ubuntu Server siecia zarzadza
+# systemd-networkd/netplan, a wstrzykniecie NM w dzialajacy system przez Wi-Fi
+# przejmuje wlan0 i ZRYWA polaczenie. NM instalujemy tylko swiadomie przy
+# wlaczonym AP fallback (krok 50) – po migracji Wi-Fi do NM (patrz Etap 3.5).
 PKGS=(
   avahi-daemon          # mDNS – ESP-ki znajduja brokera jako rpi-smarthome.local
-  network-manager       # nmcli – tuning Wi-Fi i awaryjny AP
   mosquitto-clients     # mosquitto_pub/sub dla CLI i diagnostyki
   zram-tools            # kompresowany swap w RAM (wlasciwe dla 512MB Zero 2W)
+  iw                    # wylaczenie Wi-Fi power save (renderer-agnostycznie)
   i2c-tools             # wykrywanie LCD (i2cdetect)
   jq                    # parsowanie JSON w CLI
   python3-venv          # srodowisko dla uslug Pythona

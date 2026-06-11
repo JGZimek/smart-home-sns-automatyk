@@ -3,19 +3,26 @@
 # Zastepuje stary host_config.sh (ktory zakladal Raspberry Pi OS: dphys-swapfile/iwconfig).
 
 # --- 1. Wi-Fi power save OFF (eliminuje losowe rozlaczenia brokera) ---
-# Na Ubuntu Wi-Fi obsluguje NetworkManager => konfigurujemy go, nie iwconfig.
-if write_if_changed /etc/NetworkManager/conf.d/10-wifi-powersave-off.conf <<'EOF'
-# Smart Home: wylacz oszczedzanie energii Wi-Fi (stabilnosc polaczenia z brokerem).
-# 2 = disable power save.
-[connection]
-wifi.powersave = 2
+# Renderer-agnostycznie: oneshot z 'iw' dziala niezaleznie od networkd/NM i NIE
+# przejmuje interfejsu (bezpieczne dla zdalnej instalacji przez Wi-Fi).
+if write_if_changed /etc/systemd/system/wifi-powersave-off.service <<'EOF'
+[Unit]
+Description=Smart Home: wylacz Wi-Fi power save (stabilnosc polaczenia z brokerem)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for d in $(iw dev 2>/dev/null | sed -n "s/\\s*Interface //p"); do iw dev "$d" set power_save off || true; done'
+
+[Install]
+WantedBy=multi-user.target
 EOF
 then
-  log "Wi-Fi power save wylaczony – restartuje NetworkManager."
-  systemctl restart NetworkManager || warn "Nie udalo sie zrestartowac NetworkManager (moze byc OK przy pierwszej instalacji)."
-else
-  ok "Wi-Fi power save juz skonfigurowany."
+  log "Konfiguruje wylaczenie Wi-Fi power save (iw)."
+  systemctl daemon-reload
 fi
+systemctl enable --now wifi-powersave-off.service >/dev/null 2>&1 || warn "Nie udalo sie ustawic power save off (sprawdz 'iw dev')."
 
 # --- 2. zram swap (kompresja RAM zamiast dphys-swapfile; idealne dla 512MB) ---
 # zram-tools czyta /etc/default/zramswap. Ustawiamy ~50% RAM jako skompresowany swap.

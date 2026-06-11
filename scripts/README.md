@@ -80,11 +80,33 @@ a ESP pobiera firmware lokalnie z Pi. Pełna procedura (w tym GitHub Actions prz
 
 | Mechanizm | Co robi |
 | :-------- | :------ |
-| **Awaryjny AP Wi-Fi** (`smarthome-wifi-fallback`) | Gdy Pi straci połączenie z siecią na dłużej niż karencja, podnosi własny AP `SmartHome-Config` ze stroną do wpisania nowej sieci. Po sukcesie kasuje AP. |
+| **Awaryjny AP Wi-Fi** (`smarthome-wifi-fallback`) | **Opt-in** (`AP_FALLBACK_ENABLE=1`, wymaga Wi-Fi pod NetworkManager – patrz niżej). Gdy Pi straci połączenie z siecią na dłużej niż karencja, podnosi własny AP `SmartHome-Config` ze stroną do wpisania nowej sieci. Po sukcesie kasuje AP. |
 | **Watchdog brokera** (`smarthome-health.timer`) | Co 2 min sprawdza port 1883; po 2 nieudanych próbach restartuje kontener brokera. |
 | **Sprzętowy watchdog** (systemd) | Reboot Pi przy zawisie systemu. |
 | **zram swap** | Kompresowany swap w RAM – zapas pamięci na Zero 2W bez zużywania karty SD. |
 | **Docker `restart: unless-stopped`** | Broker wstaje sam po reboocie / awarii kontenera. |
+
+### Wi-Fi pod NetworkManager (potrzebne tylko dla awaryjnego AP)
+
+Ubuntu Server domyślnie zarządza siecią przez **systemd-networkd/netplan**, a nie NetworkManager.
+Broker, mDNS, OTA, Tailscale, dashboard i watchdogi **działają niezależnie od tego** – instalator celowo
+**nie** instaluje NetworkManagera (instalacja NM po Wi-Fi przejęłaby `wlan0` i zerwała połączenie).
+Power-save wyłączamy renderer-agnostycznie przez `iw` (usługa `wifi-powersave-off`).
+
+Awaryjny AP wymaga jednak NM. Aby go włączyć, **zmigruj Wi-Fi do NetworkManagera** (najlepiej z konsoli
+Pi lub przez Tailscale, bo na chwilę zerwie sieć):
+
+```bash
+sudo tee /etc/netplan/99-networkmanager.yaml >/dev/null <<'EOF'
+network:
+  version: 2
+  renderer: NetworkManager
+EOF
+sudo netplan apply
+sudo nmcli dev wifi connect "<TWOJ_SSID>" password "<HASLO>"
+# następnie w /etc/smarthome/smarthome.env ustaw AP_FALLBACK_ENABLE=1 i:
+sudo smarthome update
+```
 
 ## Struktura katalogu
 
