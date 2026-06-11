@@ -42,6 +42,20 @@ def nmcli(*args, check=False):
     return subprocess.run(["nmcli", *args], capture_output=True, text=True, check=check)
 
 
+def nm_manages_wifi():
+    """True tylko gdy NetworkManager zarzadza jakims interfejsem Wi-Fi.
+    Na Ubuntu Server (networkd) wlan0 bywa 'unmanaged' – wtedy NIE ruszamy sieci."""
+    try:
+        out = nmcli("-t", "-f", "DEVICE,TYPE,STATE", "device")
+    except FileNotFoundError:
+        return False
+    for line in out.stdout.strip().splitlines():
+        parts = line.split(":")
+        if len(parts) >= 3 and parts[1] == "wifi" and parts[2] != "unmanaged":
+            return True
+    return False
+
+
 def has_connectivity():
     """True, jesli Pi ma aktywne polaczenie sieciowe (eth lub wifi-klient)."""
     # 1. Aktywne urzadzenia inne niz nasz AP / loopback.
@@ -168,11 +182,25 @@ def web_server():
 
 def main():
     log("Start. AP fallback SSID='%s', karencja=%ss" % (AP_SSID, GRACE_S))
-    threading.Thread(target=web_server, daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+
+    # Zabezpieczenie: jesli NM nie zarzadza Wi-Fi (np. Ubuntu Server pod networkd),
+    # NIE ruszamy interfejsu – tylko czekamy, az ktos zmigruje sie do NM.
+    warned = False
+    while not nm_manages_wifi():
+        if not warned:
+            log("NetworkManager nie zarzadza Wi-Fi (interfejs 'unmanaged' lub brak nmcli).")
+            log("AP fallback BEZCZYNNY. Zmigruj Wi-Fi do NM (Etap 3.5), aby go uzywac.")
+            warned = True
+        time.sleep(60)
+
+    threading.Thread(target=web_server, daemon=True).start()
 
     down_since = None
     while True:
+        if not nm_manages_wifi():
+            time.sleep(CHECK_INTERVAL_S)
+            continue
         if has_connectivity():
             down_since = None
             if _ap_active.is_set():
