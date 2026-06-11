@@ -36,6 +36,7 @@ const char KEY_MAP[4][4] = {
 };
 
 static rc522_handle_t rfid_scanner;
+static TaskHandle_t door_task_handle = NULL;
 
 // =========================================================================
 // NATYWNA OBSŁUGA SERWA (LEDC)
@@ -132,20 +133,34 @@ static void keypad_task(void *pvParameters) {
 }
 
 // =========================================================================
-// OBSŁUGA MQTT (Rozkaz otwarcia drzwi)
+// ZADANIE: STEROWANIE ZAMKIEM
+// =========================================================================
+// Wydzielone z callbacku MQTT, aby cykl otwarcia (5 s opóźnienia) nie
+// blokował wątku pętli zdarzeń MQTT. Wątek czeka na powiadomienie i
+// realizuje pełny cykl otwórz -> czekaj -> zamknij.
+static void door_task(void *pvParameters) {
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        ESP_LOGI(TAG_ACC, "Otwieram zamek na 5 sekund!");
+        set_servo_angle(90); // Otwarcie
+        mqtt_publish("home/access/door/state", "OPEN", 1, 1);
+
+        vTaskDelay(pdMS_TO_TICKS(5000));
+
+        ESP_LOGI(TAG_ACC, "Zamykam zamek.");
+        set_servo_angle(0);  // Zamknięcie
+        mqtt_publish("home/access/door/state", "CLOSED", 1, 1);
+    }
+}
+
+// =========================================================================
+// OBSŁUGA MQTT (Rozkaz otwarcia drzwi) – nieblokująca
 // =========================================================================
 void access_mqtt_callback(const char* topic, const char* data, int data_len) {
     if (strncmp(topic, "home/access/door/set", strlen("home/access/door/set")) == 0) {
-        if (strncmp(data, "OPEN", 4) == 0) {
-            ESP_LOGI(TAG_ACC, "Otwieram zamek na 5 sekund!");
-            set_servo_angle(90); // Otwarcie
-            mqtt_publish("home/access/door/state", "OPEN", 1, 1);
-            
-            vTaskDelay(pdMS_TO_TICKS(5000));
-            
-            ESP_LOGI(TAG_ACC, "Zamykam zamek.");
-            set_servo_angle(0);  // Zamknięcie
-            mqtt_publish("home/access/door/state", "CLOSED", 1, 1);
+        if (strncmp(data, "OPEN", 4) == 0 && door_task_handle != NULL) {
+            xTaskNotifyGive(door_task_handle); // sygnał do door_task, callback nie blokuje
         }
     }
 }
@@ -172,7 +187,10 @@ void init_access_system(void) {
     rc522_register_events(rfid_scanner, RC522_EVENT_ANY, rc522_handler, NULL);
     rc522_start(rfid_scanner);
 
-    // 3. Klawiatura 
+    // 3. Wątek sterowania zamkiem (obsługa rozkazów otwarcia bez blokowania MQTT)
+    xTaskCreatePinnedToCore(door_task, "door_task", 3072, NULL, 5, &door_task_handle, 1);
+
+    // 4. Klawiatura
     xTaskCreatePinnedToCore(keypad_task, "keypad_task", 3072, NULL, 5, NULL, 1);
 
     ESP_LOGI(TAG_ACC, "Access System Initialized!");

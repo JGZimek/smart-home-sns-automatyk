@@ -21,6 +21,7 @@ static const char* TAG_SEC = "SECURITY";
 #define PIN_SIREN    GPIO_NUM_25
 
 #define GAS_THRESHOLD 2000
+#define SIREN_HOLD_MS 5000   // jak długo syrena gra po ustąpieniu zdarzenia
 
 static volatile bool systemArmed = false;
 static adc_oneshot_unit_handle_t adc1_handle;
@@ -36,52 +37,71 @@ void security_mqtt_callback(const char* topic, const char* data, int data_len) {
             systemArmed = false;
             gpio_set_level(PIN_SIREN, 0); // Wyłącz syrenę przy rozbrojeniu
             ESP_LOGW(TAG_SEC, "SYSTEM DISARMED");
-            // mqtt_publish("home/security/status", "{\"val\": 0}", 1, 1);
+            mqtt_publish("home/security/status", "{\"val\": 0}", 1, 1);
         }
     }
 }
 
 // --- GŁÓWNE ZADANIE SYSTEMU ---
+// Pętla 5 Hz, w pełni nieblokująca. Zdarzenia publikowane są na zboczu
+// (zmiana stanu), aby nie zaśmiecać brokera. Syrena jest sterowana
+// jednym punktem na końcu pętli i przytrzymywana przez SIREN_HOLD_MS,
+// dzięki czemu wykrycie ognia/gazu nie jest „zagłuszane” obsługą PIR.
 static void security_task(void *pvParameters) {
     ESP_LOGI(TAG_SEC, "Security Task Started");
 
+    bool prev_pir1 = false, prev_pir2 = false, prev_fire = false, prev_gas = false;
+    TickType_t siren_off_at = 0;
+
     while (1) {
-        // 1. ODCZYT PIR (Tylko jeśli uzbrojony)
-        if (systemArmed) {
-            if (gpio_get_level(PIN_PIR_1) == 1) {
-                ESP_LOGW(TAG_SEC, "Motion Detected PIR 1");
-                gpio_set_level(PIN_SIREN, 1);
-                // mqtt_publish("home/security/motion/1", "{\"val\": 1}", 1, 0);
-                vTaskDelay(pdMS_TO_TICKS(5000));
-                gpio_set_level(PIN_SIREN, 0);
-            }
-            if (gpio_get_level(PIN_PIR_2) == 1) {
-                ESP_LOGW(TAG_SEC, "Motion Detected PIR 2");
-                gpio_set_level(PIN_SIREN, 1);
-                // mqtt_publish("home/security/motion/2", "{\"val\": 1}", 1, 0);
-                vTaskDelay(pdMS_TO_TICKS(5000));
-                gpio_set_level(PIN_SIREN, 0);
-            }
-        }
+        TickType_t now = xTaskGetTickCount();
+        bool active = false; // czy w tej iteracji występuje aktywne zagrożenie
 
-        // 2. ODCZYT OGNIOWY (Zawsze aktywny)
-        if (gpio_get_level(PIN_FLAME) == 0) { // Często moduły dają stan niski przy płomieniu
-            ESP_LOGE(TAG_SEC, "FIRE DETECTED!");
-            gpio_set_level(PIN_SIREN, 1);
-            // mqtt_publish("home/security/fire", "{\"val\": 1}", 1, 0);
+        // 1. PIR – brany pod uwagę tylko w trybie uzbrojonym
+        bool pir1 = systemArmed && gpio_get_level(PIN_PIR_1) == 1;
+        bool pir2 = systemArmed && gpio_get_level(PIN_PIR_2) == 1;
+        if (pir1 && !prev_pir1) {
+            ESP_LOGW(TAG_SEC, "Motion Detected PIR 1");
+            mqtt_publish("home/security/motion/1", "{\"val\": 1}", 1, 0);
         }
+        if (pir2 && !prev_pir2) {
+            ESP_LOGW(TAG_SEC, "Motion Detected PIR 2");
+            mqtt_publish("home/security/motion/2", "{\"val\": 1}", 1, 0);
+        }
+        prev_pir1 = pir1;
+        prev_pir2 = pir2;
+        if (pir1 || pir2) active = true;
 
-        // 3. ODCZYT GAZU (Zawsze aktywny)
+        // 2. Czujnik płomienia – zawsze aktywny (stan niski = płomień)
+        bool fire = gpio_get_level(PIN_FLAME) == 0;
+        if (fire != prev_fire) {
+            ESP_LOGE(TAG_SEC, fire ? "FIRE DETECTED!" : "Fire cleared");
+            mqtt_publish("home/security/fire", fire ? "{\"val\": 1}" : "{\"val\": 0}", 1, 1);
+            prev_fire = fire;
+        }
+        if (fire) active = true;
+
+        // 3. Czujnik gazu (ADC) – zawsze aktywny; błąd odczytu nie restartuje węzła
         int gasValue = 0;
-        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_6, &gasValue));
-        if (gasValue > GAS_THRESHOLD) {
-            ESP_LOGE(TAG_SEC, "GAS LEAK! Level: %d", gasValue);
-            gpio_set_level(PIN_SIREN, 1);
-            
-            // char payload[32];
-            // snprintf(payload, sizeof(payload), "{\"val\": %d}", gasValue);
-            // mqtt_publish("home/security/gas", payload, 1, 0);
+        if (adc_oneshot_read(adc1_handle, ADC_CHANNEL_6, &gasValue) == ESP_OK) {
+            bool gas = gasValue > GAS_THRESHOLD;
+            if (gas != prev_gas) {
+                ESP_LOGE(TAG_SEC, gas ? "GAS LEAK! Level: %d" : "Gas cleared (%d)", gasValue);
+                char payload[32];
+                snprintf(payload, sizeof(payload), "{\"val\": %d}", gasValue);
+                mqtt_publish("home/security/gas", payload, 1, 1);
+                prev_gas = gas;
+            }
+            if (gas) active = true;
+        } else {
+            ESP_LOGW(TAG_SEC, "Blad odczytu ADC czujnika gazu");
         }
+
+        // 4. Sterowanie syreną – jeden punkt decyzyjny, z przytrzymaniem
+        if (active) {
+            siren_off_at = now + pdMS_TO_TICKS(SIREN_HOLD_MS);
+        }
+        gpio_set_level(PIN_SIREN, (now < siren_off_at) ? 1 : 0);
 
         vTaskDelay(pdMS_TO_TICKS(200)); // Pętla działa z częstotliwością 5Hz
     }

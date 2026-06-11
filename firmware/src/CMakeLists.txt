@@ -1,4 +1,4 @@
-idf_component_register(SRCS "main.cpp"
+idf_component_register(SRCS "device_core.cpp" "main.cpp"
                             "network_core.cpp"
                             "mqtt_core.cpp"
                             "security_system.cpp"

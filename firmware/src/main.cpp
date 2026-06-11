@@ -7,6 +7,7 @@
 #include "module_config.h"
 #include "network_core.h"
 #include "mqtt_core.h"
+#include "device_core.h"
 
 // Dodajemy nagłówki zależne od wybranego środowiska
 #if defined(MODULE_SECURITY)
@@ -38,6 +39,9 @@ extern "C" void app_main() {
     
     // Inicjalizacja sieci (WiFi Provisioning), która z kolei uruchomi MQTT
     wifi_init_and_prov();
+
+    // Wspólny heartbeat diagnostyczny (publikuje się dopiero po połączeniu MQTT)
+    device_start_diag_task();
 
     // Start sprzętu i logiki dla wybranej platformy
 #if defined(MODULE_SECURITY)

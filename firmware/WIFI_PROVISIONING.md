@@ -26,8 +26,8 @@ Makieta składa się z trzech odrębnych układów ESP32 realizujących różne 
 | :--- | :--- | :--- |
 | `env:security_system` | System alarmowy, czujniki PIR, gazu, płomienia, syrena | **`PROV_Security`** |
 | `env:access_system` | Kontrola dostępu, czytnik RFID, klawiatura, serwo | **`PROV_Access`** |
-| `env:environment_system` | Stacja pogodowa, czujniki klimatu, wentylatory | **`PROV_Env`** |
-| `env:basic_default` | Czysty profil bazowy / testowy | **`PROV_SmartHome`** |
+| `env:environment_system` | Stacja pogodowa, czujniki klimatu, wentylatory | **`PROV_Environment`** |
+| `env:basic_default` | Czysty profil bazowy / testowy | **`PROV_default`** |
 
 ---
 

@@ -34,46 +34,87 @@ void ota_update_task(void *pvParameter)
     esp_http_client_config_t config = {};
     config.url = ota_url;
     config.timeout_ms = 8000;
-    config.skip_cert_common_name_check = true; 
+    config.skip_cert_common_name_check = true;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (esp_http_client_open(client, 0) != ESP_OK) {
-        ESP_LOGE(TAG_OTA, "Blad: Nie mozna otworzyc polaczenia HTTP z serwerem aktualizacji.");
+    if (client == NULL) {
+        ESP_LOGE(TAG_OTA, "Blad: Nie mozna utworzyc klienta HTTP.");
         free(ota_url);
         vTaskDelete(NULL);
+        return;
+    }
+
+    if (esp_http_client_open(client, 0) != ESP_OK) {
+        ESP_LOGE(TAG_OTA, "Blad: Nie mozna otworzyc polaczenia HTTP z serwerem aktualizacji.");
+        esp_http_client_cleanup(client);
+        free(ota_url);
+        vTaskDelete(NULL);
+        return;
     }
     esp_http_client_fetch_headers(client);
 
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    if (update_partition == NULL) {
+        ESP_LOGE(TAG_OTA, "Blad: Brak wolnej partycji OTA.");
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        free(ota_url);
+        vTaskDelete(NULL);
+        return;
+    }
     ESP_LOGI(TAG_OTA, "Zapisuje firmware do partycji: %s na adresie 0x%lx", update_partition->label, update_partition->address);
 
     esp_ota_handle_t update_handle = 0;
-    ESP_ERROR_CHECK(esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle));
+    esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
+    if (err != ESP_OK) {
+        // Nie używamy ESP_ERROR_CHECK, aby błędna aktualizacja nie restartowała całego węzła.
+        ESP_LOGE(TAG_OTA, "esp_ota_begin nie powiodlo sie: %s", esp_err_to_name(err));
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        free(ota_url);
+        vTaskDelete(NULL);
+        return;
+    }
 
     char ota_buffer[1024];
     int read_len;
     int total_read = 0;
+    int next_log = 51200;
+    bool write_ok = true;
 
     while ((read_len = esp_http_client_read(client, ota_buffer, sizeof(ota_buffer))) > 0) {
-        esp_ota_write(update_handle, (const void *)ota_buffer, read_len);
+        if (esp_ota_write(update_handle, (const void *)ota_buffer, read_len) != ESP_OK) {
+            ESP_LOGE(TAG_OTA, "Blad zapisu do partycji OTA.");
+            write_ok = false;
+            break;
+        }
         total_read += read_len;
-        if (total_read % 51200 == 0) { 
+        if (total_read >= next_log) {
             ESP_LOGI(TAG_OTA, "Pobrano: %d bajtow...", total_read);
+            next_log += 51200;
         }
     }
+    if (read_len < 0) {
+        ESP_LOGE(TAG_OTA, "Blad odczytu strumienia HTTP.");
+        write_ok = false;
+    }
 
-    ESP_LOGI(TAG_OTA, "Pobieranie zakonczone. Lacznie: %d bajtow. Weryfikacja...", total_read);
-
-    if (esp_ota_end(update_handle) == ESP_OK) {
-        if (esp_ota_set_boot_partition(update_partition) == ESP_OK) {
+    if (!write_ok) {
+        esp_ota_abort(update_handle);
+        ESP_LOGE(TAG_OTA, "Aktualizacja przerwana. Wezel pozostaje na dotychczasowej wersji.");
+    } else {
+        ESP_LOGI(TAG_OTA, "Pobieranie zakonczone. Lacznie: %d bajtow. Weryfikacja...", total_read);
+        err = esp_ota_end(update_handle);
+        if (err == ESP_OK && esp_ota_set_boot_partition(update_partition) == ESP_OK) {
             ESP_LOGW(TAG_OTA, "SUKCES! Aktualizacja zainstalowana poprawnie. Restartuje ESP32...");
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            free(ota_url);
             vTaskDelay(pdMS_TO_TICKS(1000));
             esp_restart();
         } else {
-            ESP_LOGE(TAG_OTA, "Blad przelaczania partycji startowej.");
+            ESP_LOGE(TAG_OTA, "Weryfikacja obrazu lub przelaczenie partycji nie powiodlo sie: %s", esp_err_to_name(err));
         }
-    } else {
-        ESP_LOGE(TAG_OTA, "Blad: Sprawdzenie sumy kontrolnej pobranego pliku nie powiodlo sie.");
     }
 
     esp_http_client_close(client);
@@ -96,7 +137,7 @@ esp_err_t resolve_rpi_ip(char *out_ip_uri, size_t max_len)
     esp_ip4_addr_t addr = { .addr = 0 };
     esp_err_t err = mdns_query_a(RPI_HOSTNAME, 4000, &addr);
     if (err == ESP_OK) {
-        snprintf(out_ip_uri, max_len, "mqtt://" IPSTR ":1883", IP2STR(&addr));
+        snprintf(out_ip_uri, max_len, "mqtt://" IPSTR ":%d", IP2STR(&addr), MQTT_BROKER_PORT);
         return ESP_OK;
     }
     return ESP_FAIL;
@@ -134,7 +175,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int3
                 ESP_LOGE(TAG_PROV, "Makieta stracila dostep do sieci! Uruchamiam awaryjny BLE Provisioning (%s).", PROV_BLE_NAME);
                 s_provisioning_active = true;
                 wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-                ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)"smarthome", PROV_BLE_NAME, NULL));
+                ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)PROV_POP, PROV_BLE_NAME, NULL));
             }
         }
     }
@@ -163,7 +204,7 @@ void wifi_init_and_prov(void)
     if (!provisioned) {
         s_provisioning_active = true;
         wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)"smarthome", PROV_BLE_NAME, NULL));
+        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)PROV_POP, PROV_BLE_NAME, NULL));
     } else {
         ESP_LOGI(TAG_PROV, "Dane Wi-Fi obecne we flashu. Uruchamiam probe polaczenia...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
