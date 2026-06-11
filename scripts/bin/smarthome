@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# ==========================================================
+# smarthome – CLI do zarzadzania serwerem i wezlami ESP
+# ==========================================================
+# Wygodna nakladka na mosquitto/docker/systemd – sterowanie i diagnostyka
+# przez SSH/Tailscale. Wymaga zainstalowanego serwera (setup.sh).
+set -euo pipefail
+
+# Znajdz katalog skryptow (symlink-aware) i zaladuj wspolna biblioteke.
+SRC="${BASH_SOURCE[0]}"
+while [ -L "$SRC" ]; do SRC="$(readlink "$SRC")"; done
+BIN_DIR="$(cd "$(dirname "$SRC")" && pwd)"
+# shellcheck source=../lib/common.sh
+. "$BIN_DIR/../lib/common.sh"
+load_config
+
+B_HOST="localhost"
+B_USER="${BROKER_USER:-esp32}"
+B_PASS="${BROKER_PASS:-esp32}"
+B_PORT="${MQTT_PORT:-1883}"
+NODES_JSON="$STATE_DIR/nodes.json"
+
+mq_pub() { mosquitto_pub -h "$B_HOST" -p "$B_PORT" -u "$B_USER" -P "$B_PASS" "$@"; }
+mq_sub() { mosquitto_sub -h "$B_HOST" -p "$B_PORT" -u "$B_USER" -P "$B_PASS" "$@"; }
+
+usage() {
+  cat <<EOF
+smarthome – zarzadzanie serwerem Smart Home i wezlami ESP
+
+  smarthome status                 Stan serwera (broker, uslugi, temp, siec, Tailscale)
+  smarthome nodes                  Lista wezlow ESP i ich zdrowie (z monitora)
+  smarthome cmd <kind> <komenda>   Komenda do wezla: reboot|reset_wifi|identify|diag|ping
+  smarthome ota <kind> <url>       Zdalna aktualizacja firmware (URL do firmware.bin)
+  smarthome set <topic> <payload>  Surowa publikacja MQTT (np. sterowanie aktuatorem)
+  smarthome watch [topic]          Podglad ruchu MQTT (domyslnie home/#)
+  smarthome logs [usluga]          Logi: monitor|wifi|lcd|health|broker (domyslnie monitor)
+  smarthome broker <up|down|restart|logs>   Sterowanie kontenerem brokera
+  smarthome update                 git pull + ponowny setup (aktualizacja serwera)
+  smarthome tailscale [args...]    Przekazuje do 'tailscale' (np. 'smarthome tailscale status')
+
+  kind = security | access | environment | system
+EOF
+}
+
+cmd_status() {
+  printf '%s== Smart Home – status ==%s\n' "$C_BOLD" "$C_RESET"
+  printf 'Hostname        : %s (%s.local)\n' "$(hostname)" "${HOSTNAME:-rpi-smarthome}"
+
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^mqtt_broker$'; then
+    ok "Broker MQTT     : kontener UP"
+  else
+    err "Broker MQTT     : kontener NIE DZIALA"
+  fi
+  if nc -z localhost "$B_PORT" 2>/dev/null; then
+    ok "Port $B_PORT      : nasluchuje"
+  else
+    err "Port $B_PORT      : brak odpowiedzi"
+  fi
+
+  for svc in smarthome-node-monitor smarthome-wifi-fallback smarthome-lcd avahi-daemon; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      printf '  %-26s %sactive%s\n' "$svc" "$C_GREEN" "$C_RESET"
+    elif systemctl list-unit-files 2>/dev/null | grep -q "^$svc"; then
+      printf '  %-26s %sinactive%s\n' "$svc" "$C_YELLOW" "$C_RESET"
+    fi
+  done
+
+  if [ -r /sys/class/thermal/thermal_zone0/temp ]; then
+    local t; t="$(awk '{printf "%.1f", $1/1000}' /sys/class/thermal/thermal_zone0/temp)"
+    printf 'Temp CPU        : %s C\n' "$t"
+  fi
+  printf 'Swap (zram)     : %s\n' "$(free -h 2>/dev/null | awk '/Swap/{print $3"/"$2}')"
+  printf 'IP lokalne      : %s\n' "$(hostname -I 2>/dev/null | xargs)"
+  if have tailscale; then
+    printf 'Tailscale       : %s\n' "$(tailscale ip -4 2>/dev/null | head -n1 || echo 'niezalogowany')"
+  fi
+
+  if [ -r "$NODES_JSON" ] && have jq; then
+    local on tot
+    on="$(jq '[.nodes[]|select(.status=="online")]|length' "$NODES_JSON" 2>/dev/null || echo '?')"
+    tot="$(jq '.nodes|length' "$NODES_JSON" 2>/dev/null || echo '?')"
+    printf 'Wezly ESP       : %s/%s online (szczegoly: smarthome nodes)\n' "$on" "$tot"
+  fi
+}
+
+cmd_nodes() {
+  if [ ! -r "$NODES_JSON" ]; then
+    warn "Brak $NODES_JSON – czy usluga smarthome-node-monitor dziala?"; return 1
+  fi
+  if ! have jq; then
+    cat "$NODES_JSON"; return 0
+  fi
+  printf '%-14s %-9s %-9s %-8s %s\n' "KIND" "STATUS" "AVAIL" "DIAG_S" "ID"
+  jq -r '.nodes | to_entries[] |
+    "\(.key)\t\(.value.status // "-")\t\(.value.availability // "-")\t\(.value.diag_age_s // "-")\t\(.value.info.id // "-")"' \
+    "$NODES_JSON" | while IFS=$'\t' read -r kind status avail age id; do
+      printf '%-14s %-9s %-9s %-8s %s\n' "$kind" "$status" "$avail" "$age" "$id"
+    done
+  echo
+  local srv; srv="$(jq -r '.server | "Serwer: temp=\(.cpu_temp_c)C  RAM=\(.mem_avail_mb)/\(.mem_total_mb)MB  ip=\(.ip)  ts=\(.tailscale_ip)"' "$NODES_JSON" 2>/dev/null)"
+  [ -n "$srv" ] && echo "$srv"
+}
+
+cmd_cmd() {
+  local kind="${1:-}" command="${2:-}"
+  [ -z "$kind" ] || [ -z "$command" ] && die "Uzycie: smarthome cmd <kind> <reboot|reset_wifi|identify|diag|ping>"
+  log "Wysylam '$command' do home/$kind/cmd"
+  mq_pub -t "home/$kind/cmd" -m "$command"
+  ok "Wyslano."
+}
+
+cmd_ota() {
+  local kind="${1:-}" url="${2:-}"
+  [ -z "$kind" ] || [ -z "$url" ] && die "Uzycie: smarthome ota <kind> <url-do-firmware.bin>"
+  log "Wysylam OTA do home/$kind/update : $url"
+  mq_pub -t "home/$kind/update" -m "$url"
+  ok "Wyslano. Sledz postep: smarthome logs broker / smarthome watch home/$kind/#"
+}
+
+cmd_set() {
+  local topic="${1:-}" payload="${2:-}"
+  [ -z "$topic" ] && die "Uzycie: smarthome set <topic> <payload>"
+  mq_pub -t "$topic" -m "$payload"
+  ok "Opublikowano $topic = $payload"
+}
+
+cmd_watch() { mq_sub -v -t "${1:-home/#}"; }
+
+cmd_logs() {
+  case "${1:-monitor}" in
+    monitor) journalctl -u smarthome-node-monitor -f ;;
+    wifi)    journalctl -u smarthome-wifi-fallback -f ;;
+    lcd)     journalctl -u smarthome-lcd -f ;;
+    health)  journalctl -u smarthome-health -f ;;
+    broker)  ( cd "$REPO_DIR" && compose logs -f mosquitto ) ;;
+    *)       die "Nieznana usluga. Dostepne: monitor|wifi|lcd|health|broker" ;;
+  esac
+}
+
+cmd_broker() {
+  case "${1:-}" in
+    up)      ( cd "$REPO_DIR" && compose up -d ) ;;
+    down)    ( cd "$REPO_DIR" && compose down ) ;;
+    restart) ( cd "$REPO_DIR" && compose restart mosquitto ) ;;
+    logs)    ( cd "$REPO_DIR" && compose logs -f mosquitto ) ;;
+    *)       die "Uzycie: smarthome broker <up|down|restart|logs>" ;;
+  esac
+}
+
+cmd_update() {
+  [ "$(id -u)" -eq 0 ] || die "Aktualizacja wymaga sudo: sudo smarthome update"
+  log "Aktualizuje repo ($REPO_DIR)..."
+  git -C "$REPO_DIR" pull --ff-only
+  log "Uruchamiam ponownie setup..."
+  bash "$SCRIPTS_DIR/setup.sh"
+}
+
+main() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    status)    cmd_status "$@" ;;
+    nodes)     cmd_nodes "$@" ;;
+    cmd)       cmd_cmd "$@" ;;
+    ota)       cmd_ota "$@" ;;
+    set)       cmd_set "$@" ;;
+    watch)     cmd_watch "$@" ;;
+    logs)      cmd_logs "$@" ;;
+    broker)    cmd_broker "$@" ;;
+    update)    cmd_update "$@" ;;
+    tailscale) tailscale "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *)         err "Nieznana komenda: $sub"; echo; usage; exit 1 ;;
+  esac
+}
+
+main "$@"

@@ -1,0 +1,17 @@
+[Unit]
+Description=Smart Home – wyswietlacz LCD I2C (opcjonalny)
+After=smarthome-node-monitor.service
+Wants=smarthome-node-monitor.service
+
+[Service]
+Type=simple
+User=smarthome
+SupplementaryGroups=i2c
+EnvironmentFile=/etc/smarthome/smarthome.env
+Environment=STATE_FILE=/var/lib/smarthome/nodes.json
+ExecStart=/opt/smarthome/scripts/.venv/bin/python /opt/smarthome/scripts/services/lcd_display.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

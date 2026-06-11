@@ -1,63 +1,113 @@
-# Smart Home RPi - Skrypty Instalacyjne i Konfiguracyjne
+# Serwer Smart Home na Raspberry Pi (plug-and-play)
 
-> 📦 Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md).
->
-> 🚧 **Uwaga:** ta strona serwerowa (skrypty RPi) jest **w trakcie przebudowy od zera** na kompleksowy plug-and-play. Obecna zawartość to wersja tymczasowa; opisane niżej kroki działają, ale docelowa architektura setupu RPi dopiero powstaje.
+> Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md).
 
-Ten folder zawiera zautomatyzowane narzedzia (Infrastructure as Code) do postawienia i konfiguracji glownego serwera Smart Home (brokera MQTT, uslug pomocniczych) na Raspberry Pi. Skrypty sa zoptymalizowane pod katem dzialania na Raspberry Pi Zero 2 W z systemem Ubuntu Server.
+Kompletny, samonaprawiający się serwer makiety na **Raspberry Pi Zero 2W + Ubuntu Server**.
+Jedno polecenie stawia broker MQTT, mDNS, fallbacki sieciowe, zdalną diagnostykę ESP-ek i zdalny
+dostęp przez Tailscale. Wszystko jest **idempotentne** – instalator można puszczać wielokrotnie.
 
-## Szybki start (Instalacja na czystym systemie)
+## Instalacja jednym poleceniem
 
-Jesli masz swiezo wgrany system Ubuntu Server na karcie SD i jestes polaczony przez SSH, wykonaj ponizsze kroki:
+Na świeżym Ubuntu Server (po połączeniu przez SSH):
 
-1. Pobierz repozytorium i przejdz do odpowiedniej galezi:
-   ```bash
-   git clone [https://github.com/JGZimek/smart-home-sns-automatyk.git](https://github.com/JGZimek/smart-home-sns-automatyk.git)
-   cd smart-home-sns-automatyk
-   git checkout develop
-   ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/JGZimek/smart-home-sns-automatyk/develop/scripts/bootstrap.sh | sudo bash
+```
 
-2. Przejdz do folderu skryptow i nadaj uprawnienia do wykonywania:
-   ```bash
-   cd scripts
-   chmod +x install.sh diag.sh host_config.sh
-   ```
+To wszystko. Bootstrap klonuje repo do `/opt/smarthome` i uruchamia `setup.sh`, który:
 
-3. Uruchom instalator (One-Click):
-   ```bash
-   ./install.sh
-   ```
+1. instaluje Docker + pakiety (avahi, NetworkManager, mosquitto-clients, zram-tools, jq…),
+2. ustawia hostname **`rpi-smarthome`** i włącza **mDNS** (ESP-ki znajdują brokera jako `rpi-smarthome.local`),
+3. tuninguje system pod 24/7 na Zero 2W (Wi-Fi power-save off, **zram** swap, sprzętowy **watchdog**),
+4. tworzy konto brokera **`esp32`/`esp32`** i uruchamia **Mosquitto** (Docker, porty 1883 + 9001 WS),
+5. instaluje usługi: monitor węzłów + web status, awaryjny AP Wi-Fi, opcjonalny LCD, watchdog brokera,
+6. instaluje **Tailscale** (`tailscale up --ssh`) do zdalnego dostępu.
 
-4. Sprawdz poprawnosc instalacji:
-   ```bash
-   ./diag.sh
-   ```
-   *Wszystkie uslugi powinny miec status "OK" lub "Dziala".*
+Po instalacji sprawdź:
 
-5. (Opcjonalnie) Uruchom ponownie system, aby upewnic sie, ze wszystko wstaje z autostartu:
-   ```bash
-   sudo reboot
-   ```
+```bash
+smarthome status
+```
+
+> **Tailscale** wymaga jednorazowego zalogowania – setup wypisze link, albo wklej pre-auth key do
+> `TAILSCALE_AUTHKEY` w `/etc/smarthome/smarthome.env` i puść `sudo smarthome update` (pełne plug-and-play).
+
+## Konfiguracja
+
+Wszystkie nastawy w **`/etc/smarthome/smarthome.env`** (tworzony z [`smarthome.env.example`](smarthome.env.example),
+setup nie nadpisuje Twoich zmian). Po edycji: `sudo smarthome update` lub restart usługi.
+
+Najważniejsze: `BROKER_USER/PASS`, `WEB_PORT`, `EXPECTED_KINDS`, `AP_*` (awaryjny AP), `LCD_*`, `TAILSCALE_*`.
+
+## CLI `smarthome` – sterowanie i diagnostyka (SSH/Tailscale)
+
+```bash
+smarthome status              # broker, usługi, temperatura, zram, IP, Tailscale, liczba węzłów
+smarthome nodes               # tabela węzłów ESP + ich zdrowie (online/stale/offline/missing)
+smarthome cmd <kind> <komenda>  # reboot | reset_wifi | identify | diag | ping  -> home/<kind>/cmd
+smarthome ota <kind> <url>    # zdalny OTA: URL do firmware.bin  -> home/<kind>/update
+smarthome set <topic> <payload>   # surowa publikacja (np. home/access/door/set OPEN)
+smarthome watch [topic]       # podgląd ruchu MQTT (domyślnie home/#)
+smarthome logs <usługa>       # monitor | wifi | lcd | health | broker
+smarthome broker <up|down|restart|logs>
+smarthome update              # git pull + ponowny setup
+smarthome tailscale status    # przekazanie do tailscale
+```
+
+`kind` = `security` | `access` | `environment` | `system`.
+
+## Zdalna diagnostyka węzłów ESP
+
+Usługa **`smarthome-node-monitor`** subskrybuje `home/+/{info,availability,diag}`, buduje rejestr węzłów
+(`/var/lib/smarthome/nodes.json`), wykrywa węzły `stale`/`offline`/`missing` i serwuje **dashboard**:
+
+- **`http://rpi-smarthome.local:8080`** – kafelki z każdym węzłem (status, RSSI, uptime, ostatni diag) + karta serwera.
+  Dostępny też przez Tailscale MagicDNS (np. z telefonu, bez bycia w tej samej sieci LAN).
+- **`http://rpi-smarthome.local:8080/api/nodes`** – ten sam stan w JSON (dla backendu/skryptów).
+
+Monitor publikuje też zdrowie samego Pi jako węzeł `home/system/server/*` – backend widzi serwer tak samo
+jak płytki ESP.
+
+## Mechanizmy odpornościowe (fallbacki)
+
+| Mechanizm | Co robi |
+| :-------- | :------ |
+| **Awaryjny AP Wi-Fi** (`smarthome-wifi-fallback`) | Gdy Pi straci połączenie z siecią na dłużej niż karencja, podnosi własny AP `SmartHome-Config` ze stroną do wpisania nowej sieci. Po sukcesie kasuje AP. |
+| **Watchdog brokera** (`smarthome-health.timer`) | Co 2 min sprawdza port 1883; po 2 nieudanych próbach restartuje kontener brokera. |
+| **Sprzętowy watchdog** (systemd) | Reboot Pi przy zawisie systemu. |
+| **zram swap** | Kompresowany swap w RAM – zapas pamięci na Zero 2W bez zużywania karty SD. |
+| **Docker `restart: unless-stopped`** | Broker wstaje sam po reboocie / awarii kontenera. |
 
 ## Struktura katalogu
 
-- `install.sh` - Glowny instalator. Aktualizuje system, instaluje Dockera i narzedzia, uruchamia optymalizacje, buduje srodowisko wirtualne dla Pythona i aktywuje uslugi systemd.
-- `host_config.sh` - Skrypt optymalizujacy system operacyjny (zwieksza SWAP do 1024MB, wylacza oszczedzanie energii dla WiFi zapobiegajac rozlaczeniom, konfiguruje sprzetowego Watchdoga).
-- `diag.sh` - Szybkie narzedzie do monitorowania. Wyswietla status Dockera, serwisow systemowych, temperature CPU, zajetosc SWAP oraz aktualne adresy IP.
-- `src/` - Kody zrodlowe w jezyku Python:
-  - `broker_lcd.py` - Obsluga fizycznego wyswietlacza LCD (I2C), informujaca o IP i stanie brokera.
-  - `wifi_manager.py` - Menedzer awaryjny sieci. W przypadku braku internetu tworzy wlasny Access Point (`SmartHome-Config`), aby umozliwic konfiguracje nowej sieci przez przegladarke.
-- `services/` - Pliki konfiguracyjne uslug `systemd` (`broker_lcd.service`, `wifi_manager.service`), ktore sa kopiowane do systemu podczas instalacji, aby zapewnic ciagle dzialanie w tle i autostart.
+```
+scripts/
+  bootstrap.sh          one-liner: klon repo -> setup
+  setup.sh              idempotentny instalator (orkiestruje setup.d/*)
+  setup.d/              kroki: 10-packages, 20-hostname-mdns, 30-tuning, 40-broker, 50-app-services, 60-tailscale
+  lib/common.sh         wspólne helpery (logi, config, compose)
+  smarthome.env.example wzorzec konfiguracji -> /etc/smarthome/smarthome.env
+  bin/smarthome         CLI (symlink w /usr/local/bin)
+  services/             node_monitor.py, wifi_fallback.py, lcd_display.py
+  systemd/              jednostki usług + timer
+  health-check.sh       watchdog brokera (z timera)
+  requirements.txt      zależności Pythona (venv: scripts/.venv)
+```
 
-## Diagnozowanie problemow
+## Diagnozowanie problemów
 
-Jesli usluga `diag.sh` wskaze na blad z ktoryms z komponentow, mozesz przejrzec jego logi za pomoca polecenia `journalctl`, np.:
+```bash
+smarthome status                       # ogólny obraz
+smarthome logs monitor                 # logi monitora węzłów
+smarthome logs broker                  # logi Mosquitto
+journalctl -u smarthome-wifi-fallback  # awaryjny AP
+ping rpi-smarthome.local               # czy mDNS działa (z innego urządzenia)
+```
 
-* Logi wyswietlacza LCD:
-  ```bash
-  journalctl -u broker_lcd -f
-  ```
-* Logi menedzera WiFi:
-  ```bash
-  journalctl -u wifi_manager -f
-  ```
+| Objaw | Przyczyna / rozwiązanie |
+| :---- | :---------------------- |
+| ESP-ki nie łączą się | mDNS: `ping rpi-smarthome.local`. Broker: `smarthome status`. Sieć **2.4 GHz**. |
+| Broker odrzuca połączenia | Konto: setup tworzy `mosquitto/config/passwd` (`esp32`/`esp32`). `smarthome logs broker`. |
+| Brak `nodes.json` / dashboardu | `systemctl status smarthome-node-monitor`, `smarthome logs monitor`. |
+| AP `SmartHome-Config` nie wstaje | `journalctl -u smarthome-wifi-fallback`; wymaga NetworkManager + `wlan0`. |
+| Tailscale offline | `smarthome tailscale status`; zaloguj: `sudo tailscale up --ssh`. |

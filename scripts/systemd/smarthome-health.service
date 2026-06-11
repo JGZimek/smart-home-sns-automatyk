@@ -1,0 +1,7 @@
+[Unit]
+Description=Smart Home – healthcheck/watchdog brokera MQTT
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/smarthome/scripts/health-check.sh

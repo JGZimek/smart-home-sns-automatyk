@@ -1,0 +1,16 @@
+[Unit]
+Description=Smart Home – monitor wezlow ESP + zdrowie Pi + web status
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smarthome
+EnvironmentFile=/etc/smarthome/smarthome.env
+Environment=STATE_FILE=/var/lib/smarthome/nodes.json
+ExecStart=/opt/smarthome/scripts/.venv/bin/python /opt/smarthome/scripts/services/node_monitor.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

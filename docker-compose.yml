@@ -10,3 +10,10 @@ services:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
+    # Ograniczenie logow – chroni karte SD Pi Zero 2W przed zapchaniem.
+    # (Watchdog brokera realizuje host-owy smarthome-health.timer -> health-check.sh.)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

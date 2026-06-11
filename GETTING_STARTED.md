@@ -36,51 +36,33 @@ Wszystkie urządzenia muszą być w **tej samej sieci Wi-Fi 2.4 GHz**. Pi udost�
 
 ## 1. Serwer: Raspberry Pi
 
-> 🚧 **Uwaga:** strona serwerowa (skrypty RPi, automatyczny setup) jest **w trakcie budowy od zera** — docelowo cały setup Pi ma być w pełni plug-and-play (jednym poleceniem: hostname, mDNS, konto brokera, autostart). Poniższe kroki to **tymczasowa procedura ręczna**, która działa już teraz; po przebudowie skryptów ta sekcja zostanie zastąpiona prostszą instrukcją.
-
-Cel: uruchomić brokera MQTT dostępnego jako `rpi-smarthome.local:1883`.
+Cel: uruchomić brokera MQTT dostępnego jako `rpi-smarthome.local:1883`. Robi to **jedno polecenie** –
+plug-and-play instalator ustawia hostname, mDNS, konto brokera, autostart, fallbacki i zdalny dostęp.
 
 ### 1.1. Przygotuj system
-- Wgraj na kartę SD system (Ubuntu Server / Raspberry Pi OS, 64-bit) i połącz się przez SSH.
+- Wgraj na kartę SD **Ubuntu Server (64-bit)** i połącz się przez SSH.
 - Podłącz Pi do tej samej sieci Wi-Fi, w której ma pracować makieta (pasmo **2.4 GHz**).
 
-### 1.2. Nadaj Pi nazwę `rpi-smarthome` i włącz mDNS  ⚠️ KLUCZOWE
-Firmware ESP32 szuka brokera po nazwie `rpi-smarthome` przez mDNS. Bez tego moduły **nie znajdą serwera**.
+### 1.2. Uruchom instalator (jedno polecenie) TO WSZYSTKO
 
 ```bash
-sudo hostnamectl set-hostname rpi-smarthome
-sudo apt update && sudo apt install -y avahi-daemon
-sudo systemctl enable --now avahi-daemon
-```
-Sprawdź z innego urządzenia w sieci: `ping rpi-smarthome.local` powinno odpowiadać.
-
-### 1.3. Pobierz projekt
-```bash
-git clone https://github.com/JGZimek/smart-home-sns-automatyk.git
-cd smart-home-sns-automatyk
+curl -fsSL https://raw.githubusercontent.com/JGZimek/smart-home-sns-automatyk/develop/scripts/bootstrap.sh | sudo bash
 ```
 
-### 1.4. Utwórz konto brokera (login/hasło)  ⚠️ WYMAGANE
-Broker odrzuca anonimowe połączenia. Firmware loguje się jako **`esp32` / `esp32`**, więc trzeba utworzyć takie konto:
+Instalator automatycznie: nada Pi nazwę **`rpi-smarthome`** + włączy **mDNS**, utworzy konto brokera
+**`esp32`/`esp32`**, uruchomi Mosquitto (Docker, porty 1883 + 9001), zainstaluje diagnostykę węzłów,
+awaryjny AP Wi-Fi, watchdogi i Tailscale. Po zakończeniu:
 
 ```bash
-# wygeneruj plik hasła oczekiwany przez mosquitto/config/mosquitto.conf
-docker run --rm -v "$PWD/mosquitto/config:/cfg" eclipse-mosquitto:2 \
-  mosquitto_passwd -b -c /cfg/passwd esp32 esp32
-```
-(Alternatywnie, jeśli masz lokalnie `mosquitto_passwd`: `mosquitto_passwd -b -c mosquitto/config/passwd esp32 esp32`.)
-
-### 1.5. Uruchom brokera
-Najprościej przez Docker:
-```bash
-docker compose up -d        # lub: sudo docker-compose up -d
-```
-Sprawdź, że działa:
-```bash
-docker ps                   # kontener "mqtt_broker" powinien być Up
+smarthome status                  # wszystko powinno być „active / UP”
 ```
 
-> **Pełna automatyczna instalacja** (broker + wyświetlacz LCD + awaryjny Access Point Wi-Fi + autostart) jest opisana w [scripts/README.md](scripts/README.md) (`./install.sh`). Uwaga: instalator zakłada projekt w `/home/smarthome/...` i **nie** ustawia jeszcze hostname/avahi z punktu 1.2 — zrób to ręcznie.
+Sprawdź mDNS z innego urządzenia w sieci: `ping rpi-smarthome.local` powinno odpowiadać.
+
+> **Tailscale** (zdalny dostęp) wymaga jednorazowego zalogowania — setup wypisze link, albo wklej
+> pre-auth key do `TAILSCALE_AUTHKEY` w `/etc/smarthome/smarthome.env` i puść `sudo smarthome update`.
+>
+> Pełny opis serwera (CLI, dashboard, konfiguracja, fallbacki): [scripts/README.md](scripts/README.md).
 
 ---
 
@@ -163,14 +145,16 @@ Komplet tematów i payloadów: [firmware/MQTT_API.md](firmware/MQTT_API.md).
 
 | Objaw | Najczęstsza przyczyna / rozwiązanie |
 | :---- | :---------------------------------- |
-| Moduły nie pojawiają się w `mosquitto_sub` | (1) Pi nie nazywa się `rpi-smarthome` lub brak `avahi-daemon` (krok 1.2). (2) Płytka nie połączyła się z Wi-Fi (krok 3). (3) ESP i Pi w różnych sieciach. |
-| Broker odrzuca połączenia | Brak pliku `mosquitto/config/passwd` lub złe konto (krok 1.4). Sprawdź `docker logs mqtt_broker`. |
+| Moduły nie pojawiają się w `mosquitto_sub` | (1) Sprawdź serwer: `smarthome status` + `ping rpi-smarthome.local` z innego urządzenia. (2) Płytka nie połączyła się z Wi-Fi (krok 3). (3) ESP i Pi w różnych sieciach. |
+| Broker odrzuca połączenia | `smarthome logs broker`. Konto `esp32`/`esp32` tworzy setup; w razie potrzeby `sudo smarthome update`. |
 | Aplikacja BLE nie widzi płytki | Płytka już sprovisionowana. Wymuś reset: zdalnie `mosquitto_pub -t home/<rodzaj>/cmd -m reset_wifi`, albo lokalnie `pio run -e <profil> -t erase`. |
 | Płytka nie łączy się z Wi-Fi | Sieć musi być **2.4 GHz** (ESP32 nie obsługuje 5 GHz). |
 | Moduł `ONLINE`, ale brak odczytów czujnika | Sprawdź podłączenie i logi serial (`115200`) – firmware wypisuje, które czujniki wykrył. Patrz [firmware/HARDWARE.md](firmware/HARDWARE.md). |
 | Płytka nie startuje po podłączeniu klawiatury | Strapping pin GPIO12 – nie trzymaj klawiszy przy włączaniu. Patrz [firmware/HARDWARE.md](firmware/HARDWARE.md). |
 
-> **Strona serwerowa do przebudowy:** docelowo kroki 1.2 (hostname + mDNS) i 1.4 (konto brokera) mają być częścią w pełni automatycznego, plug-and-play setupu Raspberry Pi (budowanego od zera). Do tego czasu wykonuje się je ręcznie jak wyżej.
+> **Diagnostyka i sterowanie z poziomu serwera:** zamiast surowych `mosquitto_pub/sub` możesz użyć
+> CLI `smarthome` (np. `smarthome nodes`, `smarthome cmd access reboot`, `smarthome ota security <url>`)
+> oraz dashboardu pod `http://rpi-smarthome.local:8080`. Szczegóły: [scripts/README.md](scripts/README.md).
 
 ---
 

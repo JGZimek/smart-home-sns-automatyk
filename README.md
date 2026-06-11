@@ -37,7 +37,7 @@ Projekt jest tak zaprojektowany, by był **plug-and-play**: po jednorazowej konf
 | Katalog | Zawartość |
 | :------ | :-------- |
 | [`firmware/`](firmware/) | Firmware ESP32 (ESP-IDF + PlatformIO) – **główna część projektu**. |
-| [`scripts/`](scripts/) | Provisioning serwera Raspberry Pi (broker, LCD, awaryjny Wi-Fi, usługi systemd). |
+| [`scripts/`](scripts/) | Plug-and-play serwer Raspberry Pi: instalator jednym poleceniem, broker, mDNS, CLI `smarthome`, diagnostyka węzłów + dashboard, awaryjny Wi-Fi, Tailscale. |
 | [`mosquitto/`](mosquitto/) | Konfiguracja brokera MQTT (uruchamiany przez `docker-compose.yml`). |
 | `backend/` | Aplikacja serwerowa – *placeholder, w budowie*. |
 | `frontend/` | Interfejs WWW – *placeholder, w budowie*. |
@@ -51,13 +51,13 @@ Wybierz według tego, **co chcesz zrobić**:
 
 | Twoja rola / cel | Przeczytaj |
 | :--------------- | :--------- |
-| 🚀 **Dostałem sprzęt i chcę uruchomić całość** | **[GETTING_STARTED.md](GETTING_STARTED.md)** |
-| 🔌 Podłączam czujniki/elektronikę do ESP32 | [firmware/HARDWARE.md](firmware/HARDWARE.md) |
-| 💻 Piszę backend/frontend (sterowanie makietą) | [firmware/MQTT_API.md](firmware/MQTT_API.md) |
-| 🛠️ Rozwijam / kompiluję firmware | [firmware/README.md](firmware/README.md) |
-| 📶 Konfiguruję Wi-Fi w module ESP32 | [firmware/WIFI_PROVISIONING.md](firmware/WIFI_PROVISIONING.md) |
-| ⬆️ Aktualizuję firmware zdalnie (OTA) | [firmware/OTA_UPDATE.md](firmware/OTA_UPDATE.md) |
-| 🖥️ Stawiam serwer na Raspberry Pi | [scripts/README.md](scripts/README.md) |
+|  **Dostałem sprzęt i chcę uruchomić całość** | **[GETTING_STARTED.md](GETTING_STARTED.md)** |
+|  Podłączam czujniki/elektronikę do ESP32 | [firmware/HARDWARE.md](firmware/HARDWARE.md) |
+|  Piszę backend/frontend (sterowanie makietą) | [firmware/MQTT_API.md](firmware/MQTT_API.md) |
+|  Rozwijam / kompiluję firmware | [firmware/README.md](firmware/README.md) |
+|  Konfiguruję Wi-Fi w module ESP32 | [firmware/WIFI_PROVISIONING.md](firmware/WIFI_PROVISIONING.md) |
+|  Aktualizuję firmware zdalnie (OTA) | [firmware/OTA_UPDATE.md](firmware/OTA_UPDATE.md) |
+|  Stawiam serwer na Raspberry Pi | [scripts/README.md](scripts/README.md) |
 
 ---
 
@@ -75,11 +75,12 @@ Pełna instrukcja krok po kroku: **[GETTING_STARTED.md](GETTING_STARTED.md)**.
 
 | Element | Stan |
 | :------ | :--- |
-| Firmware ESP32 (3 moduły + wspólny rdzeń) | ✅ działa, kompiluje się czysto |
-| Sieć: BLE provisioning, mDNS, MQTT, OTA, diagnostyka | ✅ |
-| Broker MQTT (Mosquitto) | ✅ działa |
-| Serwer RPi: kompleksowy setup plug-and-play (hostname/mDNS, konto brokera, autostart) | 🚧 do zbudowania od zera (obecne `scripts/` to wersja tymczasowa) |
-| Backend (serwer aplikacyjny) | 🚧 placeholder |
-| Frontend (panel WWW) | 🚧 placeholder |
+| Firmware ESP32 (3 moduły + wspólny rdzeń) | działa, kompiluje się czysto |
+| Sieć: BLE provisioning, mDNS, MQTT, OTA, diagnostyka |
+| Broker MQTT (Mosquitto) | działa |
+| Serwer RPi: plug-and-play (one-liner, hostname/mDNS, konto brokera, autostart, fallbacki) |
+| Serwer RPi: CLI `smarthome`, dashboard diagnostyki węzłów, Tailscale |
+| Backend (serwer aplikacyjny) | placeholder |
+| Frontend (panel WWW) | placeholder |
 
 Aktualna gałąź robocza: `develop`. Główna: `main`.

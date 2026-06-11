@@ -1,6 +1,6 @@
 # Instrukcja Podłączenia Sprzętu (Pinout makiety)
 
-> 📦 Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md) · [firmware](README.md) · [API MQTT](MQTT_API.md).
+> Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md) · [firmware](README.md) · [API MQTT](MQTT_API.md).
 
 Dokument dla osoby montującej elektronikę makiety. Opisuje, **co i do którego pinu** podłączyć na każdej z trzech płytek ESP32. Wszystkie przypisania pinów pochodzą wprost z kodu firmware (`src/*_system.cpp`) — jeśli zmienisz piny w kodzie, zaktualizuj też ten plik.
 
@@ -8,7 +8,7 @@ Dokument dla osoby montującej elektronikę makiety. Opisuje, **co i do którego
 
 ---
 
-## ⚠️ Zasady ogólne (przeczytaj przed lutowaniem)
+## Zasady ogólne (przeczytaj przed lutowaniem)
 
 1. **Wspólna masa (GND).** Wszystkie czujniki, moduły i zasilacze muszą mieć połączone GND z GND ESP32. Bez tego odczyty są losowe.
 2. **Napięcia logiki:** ESP32 pracuje na **3.3 V**. Piny GPIO **nie są tolerancyjne na 5 V** — nie podawaj 5 V bezpośrednio na wejście GPIO.
@@ -113,7 +113,7 @@ Układ klawiszy (wiersz × kolumna):
 * 0 # D
 ```
 
-> **⚠️ Ostrzeżenie – GPIO12 (pin strapping):** GPIO12 jest pinem startowym ESP32. Jeśli przy włączaniu zasilania jest w stanie WYSOKIM, płytka może się nie uruchomić (wybiera złe napięcie flash). Kolumna klawiatury ma pull-up, więc gdy w momencie startu klawisz w 3. kolumnie jest wciśnięty, start może się zawiesić. W razie problemów z bootem nie trzymaj klawiszy podczas włączania; docelowo można przenieść `COL 3` na inny wolny pin (zmiana w `COL_PINS` w kodzie).
+> ** Ostrzeżenie – GPIO12 (pin strapping):** GPIO12 jest pinem startowym ESP32. Jeśli przy włączaniu zasilania jest w stanie WYSOKIM, płytka może się nie uruchomić (wybiera złe napięcie flash). Kolumna klawiatury ma pull-up, więc gdy w momencie startu klawisz w 3. kolumnie jest wciśnięty, start może się zawiesić. W razie problemów z bootem nie trzymaj klawiszy podczas włączania; docelowo można przenieść `COL 3` na inny wolny pin (zmiana w `COL_PINS` w kodzie).
 
 ---
 
@@ -123,7 +123,7 @@ Układ klawiszy (wiersz × kolumna):
 | :--- | :-------------- | :-------------- | :-------------- |
 | 4    | –               | –               | Serwo PWM       |
 | 5    | –               | –               | RFID CS         |
-| 12   | –               | –               | Klaw. COL3 ⚠️    |
+| 12   | –               | –               | Klaw. COL3      |
 | 13   | –               | –               | Klaw. COL4      |
 | 14   | PIR #1          | –               | Klaw. COL2      |
 | 18   | –               | Przekaźnik chłodz. | RFID SCK     |
