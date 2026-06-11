@@ -8,7 +8,7 @@ name: Firmware OTA
 # Wymagane sekrety repo (Settings -> Secrets and variables -> Actions):
 #   TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET  - klient OAuth Tailscale dla runnera
 #   RPI_SSH_HOST                         - nazwa Pi w tailnecie (MagicDNS) lub IP 100.x.y.z
-#   RPI_SSH_USER                         - uzytkownik SSH na Pi (z prawem 'sudo smarthome')
+#   RPI_SSH_USER                         - uzytkownik SSH na Pi (czlonek grupy 'smarthome')
 #   RPI_SSH_KEY                          - klucz prywatny SSH do Pi
 # (Alternatywnie mozna uzyc Tailscale SSH i pominac RPI_SSH_KEY.)
 
@@ -96,5 +96,5 @@ jobs:
           echo ">>> scp ${BIN} -> ${USER}@${HOST}:${REMOTE}"
           scp -i ~/.ssh/id_rpi -o StrictHostKeyChecking=accept-new "$BIN" "${USER}@${HOST}:${REMOTE}"
           echo ">>> smarthome ota ${KIND} ${REMOTE}"
-          $SSH "${USER}@${HOST}" "sudo smarthome ota ${KIND} ${REMOTE}"
+          $SSH "${USER}@${HOST}" "smarthome ota ${KIND} ${REMOTE}"
           echo ">>> OTA rozgloszony. ESP ${KIND} pobiera firmware z Raspberry Pi."

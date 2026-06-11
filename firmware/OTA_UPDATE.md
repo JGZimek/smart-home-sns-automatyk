@@ -99,7 +99,7 @@ Wymagane sekrety repozytorium:
 | :----- | :--- |
 | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` | OAuth klienta Tailscale (lub jednorazowy `TS_AUTHKEY`) dla runnera Actions. |
 | `RPI_SSH_HOST` | Nazwa Pi w tailnecie (MagicDNS, np. `rpi-smarthome`) lub jego IP `100.x.y.z`. |
-| `RPI_SSH_USER` | Użytkownik SSH na Pi (musi móc `sudo smarthome` lub być w grupie `smarthome`). |
+| `RPI_SSH_USER` | Użytkownik SSH na Pi — **członek grupy `smarthome`** (wtedy `smarthome ota` działa bez `sudo`). |
 | `RPI_SSH_KEY` | Klucz prywatny SSH do logowania na Pi (albo użyj Tailscale SSH i pomiń ten sekret). |
 
 Uruchomienie: zakładka **Actions → Firmware OTA → Run workflow**, wybierz moduł (`security`/`access`/

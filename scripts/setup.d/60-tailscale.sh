@@ -18,6 +18,7 @@ systemctl enable --now tailscaled >/dev/null 2>&1 || true
 # Zbuduj argumenty 'tailscale up'
 up_args=(--hostname "${HOSTNAME:-rpi-smarthome}")
 [ "${TAILSCALE_SSH:-1}" = "1" ] && up_args+=(--ssh)
+[ -n "${TAILSCALE_TAGS:-}" ] && up_args+=(--advertise-tags="$TAILSCALE_TAGS")
 
 # Czy juz zalogowany?
 if tailscale status >/dev/null 2>&1 && [ "$(tailscale status --json 2>/dev/null | jq -r '.BackendState' 2>/dev/null)" = "Running" ]; then
