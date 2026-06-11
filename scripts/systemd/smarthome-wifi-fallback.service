@@ -1,0 +1,15 @@
+[Unit]
+Description=Smart Home – awaryjny Access Point Wi-Fi (NetworkManager)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/smarthome/smarthome.env
+ExecStart=/opt/smarthome/scripts/.venv/bin/python /opt/smarthome/scripts/services/wifi_fallback.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

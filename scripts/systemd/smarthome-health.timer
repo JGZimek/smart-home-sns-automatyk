@@ -1,0 +1,10 @@
+[Unit]
+Description=Smart Home – cykliczny healthcheck brokera (co 2 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

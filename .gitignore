@@ -20,6 +20,16 @@ server/mosquitto/config/passwd
 .vscode/
 **/build/
 dist/
+
+# --- BROKER MOSQUITTO (generowane przez setup, nie wersjonowac) ---
 mosquitto/config/passwd
-mosquitto/data/*.db
-mosquitto/log/*.log
+mosquitto/data/
+mosquitto/log/
+
+# --- SERWER RPI (skrypty) ---
+# virtualenv uslug Pythona budowany lokalnie na Pi
+scripts/.venv/
+# artefakty kompilacji Pythona
+__pycache__/
+*.pyc
+# realna konfiguracja serwera trzymana jest w /etc/smarthome/ na urzadzeniu

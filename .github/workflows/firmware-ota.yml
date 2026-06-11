@@ -1,0 +1,100 @@
+name: Firmware OTA
+
+# W pelni zdalny OTA na zamontowana makiete:
+#   build firmware -> wejscie do tailnetu (Tailscale) -> scp obrazu na Raspberry Pi
+#   -> 'smarthome ota <kind> <plik>' (ESP pobiera firmware z Pi po LAN).
+#
+# Uruchamianie recznie: zakladka Actions -> Firmware OTA -> Run workflow.
+# Wymagane sekrety repo (Settings -> Secrets and variables -> Actions):
+#   TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET  - klient OAuth Tailscale dla runnera
+#   RPI_SSH_HOST                         - nazwa Pi w tailnecie (MagicDNS) lub IP 100.x.y.z
+#   RPI_SSH_USER                         - uzytkownik SSH na Pi (czlonek grupy 'smarthome')
+#   RPI_SSH_KEY                          - klucz prywatny SSH do Pi
+# (Alternatywnie mozna uzyc Tailscale SSH i pominac RPI_SSH_KEY.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Modul docelowy"
+        required: true
+        type: choice
+        options: [security, access, environment, system]
+      ref:
+        description: "Gałąź/commit do zbudowania (domyślnie biezacy)"
+        required: false
+        default: ""
+
+concurrency:
+  group: firmware-ota-${{ github.event.inputs.module }}
+  cancel-in-progress: false
+
+jobs:
+  ota:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Mapuj modul -> profil PlatformIO + temat
+        id: map
+        run: |
+          case "${{ github.event.inputs.module }}" in
+            security)    echo "env=security_system"    >> "$GITHUB_OUTPUT" ;;
+            access)      echo "env=access_system"      >> "$GITHUB_OUTPUT" ;;
+            environment) echo "env=environment_system" >> "$GITHUB_OUTPUT" ;;
+            system)      echo "env=basic_default"      >> "$GITHUB_OUTPUT" ;;
+            *) echo "Nieznany modul"; exit 1 ;;
+          esac
+          echo "kind=${{ github.event.inputs.module }}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            firmware/.pio
+          key: pio-${{ runner.os }}-${{ steps.map.outputs.env }}-${{ hashFiles('firmware/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware (${{ steps.map.outputs.env }})
+        working-directory: firmware
+        run: pio run -e ${{ steps.map.outputs.env }}
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Przygotuj klucz SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.RPI_SSH_KEY }}" > ~/.ssh/id_rpi
+          chmod 600 ~/.ssh/id_rpi
+
+      - name: Wyslij OTA na Raspberry Pi
+        env:
+          HOST: ${{ secrets.RPI_SSH_HOST }}
+          USER: ${{ secrets.RPI_SSH_USER }}
+          KIND: ${{ steps.map.outputs.kind }}
+          PIOENV: ${{ steps.map.outputs.env }}
+        run: |
+          BIN="firmware/.pio/build/${PIOENV}/firmware.bin"
+          REMOTE="/tmp/${KIND}-${GITHUB_SHA::8}.bin"
+          SSH="ssh -i ~/.ssh/id_rpi -o StrictHostKeyChecking=accept-new"
+          echo ">>> scp ${BIN} -> ${USER}@${HOST}:${REMOTE}"
+          scp -i ~/.ssh/id_rpi -o StrictHostKeyChecking=accept-new "$BIN" "${USER}@${HOST}:${REMOTE}"
+          echo ">>> smarthome ota ${KIND} ${REMOTE}"
+          $SSH "${USER}@${HOST}" "smarthome ota ${KIND} ${REMOTE}"
+          echo ">>> OTA rozgloszony. ESP ${KIND} pobiera firmware z Raspberry Pi."
