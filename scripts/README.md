@@ -1,5 +1,9 @@
 # Smart Home RPi - Skrypty Instalacyjne i Konfiguracyjne
 
+> 📦 Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md).
+>
+> 🚧 **Uwaga:** ta strona serwerowa (skrypty RPi) jest **w trakcie przebudowy od zera** na kompleksowy plug-and-play. Obecna zawartość to wersja tymczasowa; opisane niżej kroki działają, ale docelowa architektura setupu RPi dopiero powstaje.
+
 Ten folder zawiera zautomatyzowane narzedzia (Infrastructure as Code) do postawienia i konfiguracji glownego serwera Smart Home (brokera MQTT, uslug pomocniczych) na Raspberry Pi. Skrypty sa zoptymalizowane pod katem dzialania na Raspberry Pi Zero 2 W z systemem Ubuntu Server.
 
 ## Szybki start (Instalacja na czystym systemie)

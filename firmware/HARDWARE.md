@@ -1,5 +1,7 @@
 # Instrukcja Podłączenia Sprzętu (Pinout makiety)
 
+> 📦 Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md) · [firmware](README.md) · [API MQTT](MQTT_API.md).
+
 Dokument dla osoby montującej elektronikę makiety. Opisuje, **co i do którego pinu** podłączyć na każdej z trzech płytek ESP32. Wszystkie przypisania pinów pochodzą wprost z kodu firmware (`src/*_system.cpp`) — jeśli zmienisz piny w kodzie, zaktualizuj też ten plik.
 
 > **Płytka:** ESP32 DevKit (moduł `esp32dev`, układ ESP32-WROOM, 38 pinów). Numery `GPIO` to numery widoczne na opisach pinów płytki (np. „D14" = GPIO14).

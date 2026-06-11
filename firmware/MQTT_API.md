@@ -1,5 +1,7 @@
 # Kontrakt komunikacyjny MQTT (dla backendu)
 
+> 📦 Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md) · [firmware](README.md) · [pinout](HARDWARE.md).
+
 Dokument dla osoby piszącej backend/frontend sterujący makietą. Opisuje **wszystkie** kanały MQTT, którymi można obserwować i sterować trzema płytkami ESP32. Źródłem prawdy jest kod firmware (`src/*.cpp`) — przy zmianach w firmware aktualizuj ten plik.
 
 ---

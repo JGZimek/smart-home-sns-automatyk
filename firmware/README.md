@@ -1,5 +1,7 @@
 # Smart Home – Firmware ESP32
 
+> 📦 Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md) · [pinout](HARDWARE.md) · [API MQTT](MQTT_API.md).
+
 Firmware węzłów końcowych makiety Smart Home. Makieta składa się z **trzech niezależnych płytek ESP32**, które współdzielą **jeden wspólny kod źródłowy**. O roli konkretnej płytki decyduje wybór środowiska kompilacji (flaga `-D MODULE_*`), a nie osobny projekt.
 
 - Framework: **ESP-IDF** (nie Arduino) przez **PlatformIO** (`framework = espidf`).
