@@ -3,8 +3,8 @@
 
 MOSQ_CFG="$REPO_DIR/mosquitto/config"
 PASSWD_FILE="$MOSQ_CFG/passwd"
-B_USER="${BROKER_USER:-esp32}"
-B_PASS="${BROKER_PASS:-esp32}"
+B_USER="${BROKER_USER:-smarthome}"
+B_PASS="${BROKER_PASS:-smarthome}"
 
 mkdir -p "$MOSQ_CFG" "$REPO_DIR/mosquitto/data" "$REPO_DIR/mosquitto/log"
 

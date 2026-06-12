@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/JGZimek/smart-home-sns-automatyk/de
 ```
 
 Instalator automatycznie: nada Pi nazwę **`rpi-smarthome`** + włączy **mDNS**, utworzy konto brokera
-**`esp32`/`esp32`**, uruchomi Mosquitto (Docker, porty 1883 + 9001), zainstaluje diagnostykę węzłów,
+**`smarthome`/`smarthome`**, uruchomi Mosquitto (Docker, porty 1883 + 9001), zainstaluje diagnostykę węzłów,
 awaryjny AP Wi-Fi, watchdogi i Tailscale. Po zakończeniu:
 
 ```bash
@@ -103,7 +103,7 @@ Powtórz dla każdej z trzech płytek. Pełna instrukcja z ekranami: [firmware/W
 Na Raspberry Pi (lub dowolnym komputerze w sieci) podejrzyj ruch MQTT:
 
 ```bash
-mosquitto_sub -h rpi-smarthome.local -u esp32 -P esp32 -t 'home/#' -v
+mosquitto_sub -h rpi-smarthome.local -u smarthome -P smarthome -t 'home/#' -v
 ```
 
 Powinieneś zobaczyć m.in.:
@@ -129,17 +129,17 @@ Jeśli widzisz `ONLINE` i `info` dla wszystkich trzech modułów — **makieta d
 
 ```bash
 # Uzbrój alarm
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/security/arm/set -m ARM
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/security/arm/set -m ARM
 
 # Włącz wentylator chłodzący
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/garden/fan/cooling/set -m ON
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/garden/fan/cooling/set -m ON
 
 # Otwórz zamek (na 5 s)
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/access/door/set -m OPEN
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/access/door/set -m OPEN
 
 # Poproś moduł o diagnostykę / zrestartuj go
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/environment/cmd -m diag
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/access/cmd -m reboot
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/environment/cmd -m diag
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/access/cmd -m reboot
 ```
 
 Komplet tematów i payloadów: [firmware/MQTT_API.md](firmware/MQTT_API.md).
@@ -151,7 +151,7 @@ Komplet tematów i payloadów: [firmware/MQTT_API.md](firmware/MQTT_API.md).
 | Objaw | Najczęstsza przyczyna / rozwiązanie |
 | :---- | :---------------------------------- |
 | Moduły nie pojawiają się w `mosquitto_sub` | (1) Sprawdź serwer: `smarthome status` + `ping rpi-smarthome.local` z innego urządzenia. (2) Płytka nie połączyła się z Wi-Fi (krok 3). (3) ESP i Pi w różnych sieciach. |
-| Broker odrzuca połączenia | `smarthome logs broker`. Konto `esp32`/`esp32` tworzy setup; w razie potrzeby `sudo smarthome update`. |
+| Broker odrzuca połączenia | `smarthome logs broker`. Konto `smarthome`/`smarthome` tworzy setup; w razie potrzeby `sudo smarthome update`. |
 | Aplikacja BLE nie widzi płytki | Płytka już sprovisionowana. Wymuś reset: zdalnie `mosquitto_pub -t home/<rodzaj>/cmd -m reset_wifi`, albo lokalnie `pio run -e <profil> -t erase`. |
 | Płytka nie łączy się z Wi-Fi | Sieć musi być **2.4 GHz** (ESP32 nie obsługuje 5 GHz). |
 | Moduł `ONLINE`, ale brak odczytów czujnika | Sprawdź podłączenie i logi serial (`115200`) – firmware wypisuje, które czujniki wykrył. Patrz [firmware/HARDWARE.md](firmware/HARDWARE.md). |

@@ -92,7 +92,7 @@ Publikacja na `home/<rodzaj>/cmd` słowa kluczowego lub `{"cmd":"..."}`:
 | `identify`   | Ponownie publikuje `info`. |
 | `diag`/`ping`| Natychmiast publikuje diagnostykę. |
 
-Przykład (z RPi): `mosquitto_pub -t home/security/cmd -m reboot -u esp32 -P esp32`
+Przykład (z RPi): `mosquitto_pub -t home/security/cmd -m reboot -u smarthome -P smarthome`
 
 Logika wspólna dla wszystkich modułów: [src/device_core.cpp](src/device_core.cpp).
 

@@ -12,7 +12,7 @@ Dokument dla osoby piszącej backend/frontend sterujący makietą. Opisuje **wsz
 | :------- | :------ |
 | Broker   | Mosquitto na Raspberry Pi (`docker-compose.yml` w katalogu głównym) |
 | Host     | `rpi-smarthome.local` (mDNS) lub IP RPi; port **1883** |
-| Login / hasło | `esp32` / `esp32` |
+| Login / hasło | `smarthome` / `smarthome` |
 | WebSocket | port **9001** (np. dla frontendu w przeglądarce) |
 
 > Każda płytka sama odnajduje brokera przez mDNS (`rpi-smarthome`) i łączy się automatycznie — backend nie konfiguruje urządzeń, tylko korzysta z tych samych tematów.
@@ -143,7 +143,7 @@ To **nie firmware**, lecz serwer RPi — ale w MQTT zachowuje się jak każdy in
 
 ## 7. Typowy scenariusz integracji
 
-1. **Połącz** się z brokerem (`rpi-smarthome.local:1883`, `esp32`/`esp32`).
+1. **Połącz** się z brokerem (`rpi-smarthome.local:1883`, `smarthome`/`smarthome`).
 2. **Wykryj urządzenia:** zasubskrybuj `home/+/info` i `home/+/availability` (retained → dostaniesz aktualny stan od razu). Z `info` masz id, rodzaj, wersję fw, IP oraz tematy `cmd`/`diag`.
 3. **Obserwuj** telemetrię/zdarzenia z tabel modułów oraz `home/+/diag` (zdrowie).
 4. **Steruj** publikując na tematy `.../set` i `.../cmd`.
@@ -151,23 +151,23 @@ To **nie firmware**, lecz serwer RPi — ale w MQTT zachowuje się jak każdy in
 ### Przykłady (mosquitto_clients)
 ```bash
 # Podgląd wszystkiego
-mosquitto_sub -h rpi-smarthome.local -u esp32 -P esp32 -t 'home/#' -v
+mosquitto_sub -h rpi-smarthome.local -u smarthome -P smarthome -t 'home/#' -v
 
 # Auto-discovery: kto jest online i czym jest
-mosquitto_sub -h rpi-smarthome.local -u esp32 -P esp32 -t 'home/+/info' -t 'home/+/availability' -v
+mosquitto_sub -h rpi-smarthome.local -u smarthome -P smarthome -t 'home/+/info' -t 'home/+/availability' -v
 
 # Uzbrojenie alarmu
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/security/arm/set -m ARM
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/security/arm/set -m ARM
 
 # Włączenie wentylatora chłodzącego
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/garden/fan/cooling/set -m ON
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/garden/fan/cooling/set -m ON
 
 # Otwarcie drzwi
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/access/door/set -m OPEN
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/access/door/set -m OPEN
 
 # Diagnostyka na żądanie / restart węzła
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/environment/cmd -m diag
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 -t home/security/cmd -m reboot
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/environment/cmd -m diag
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/security/cmd -m reboot
 ```
 
 > **Z poziomu samego Pi** te same operacje upraszcza CLI `smarthome` (cienka nakładka na powyższe tematy): `smarthome nodes`, `smarthome cmd security reboot`, `smarthome ota environment <url>`, `smarthome set home/access/door/set OPEN`. Szczegóły: [scripts/README.md](../scripts/README.md).
