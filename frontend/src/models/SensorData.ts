@@ -1,5 +1,5 @@
 export interface SensorData {
-  id: number;
+  id: string;
   sensor_type: string;
   value: number;
   unit: string;

@@ -7,6 +7,7 @@ import Sensors from "./pages/Sensors.tsx";
 import { ROUTES } from "./Routes.ts";
 import Layout from "./components/Layout.tsx";
 import { Rooms } from "./pages/Rooms.tsx";
+import SensorHistory from "./pages/SensorHistory.tsx";
 import CssBaseline from "@mui/material/CssBaseline";
 
 createRoot(document.getElementById("root")!).render(
@@ -14,9 +15,10 @@ createRoot(document.getElementById("root")!).render(
     <CssBaseline />
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Layout />} >
+        <Route path="/" element={<Layout />}>
           <Route index element={<MainPage />} />
           <Route path={ROUTES.SENSORS} element={<Sensors />} />
+          <Route path="/sensors/:id/history" element={<SensorHistory />} />
           <Route path={ROUTES.ROOMS} element={<Rooms />} />
         </Route>
       </Routes>
