@@ -52,6 +52,7 @@ if [ "${AP_FALLBACK_ENABLE:-0}" = "1" ]; then
   if ! have nmcli; then
     warn "AP fallback wymaga NetworkManager – instaluje pakiet."
     warn "Jesli laczysz sie przez Wi-Fi pod networkd, NAJPIERW zmigruj sie do NM (Etap 3.5)!"
+    wait_for_apt
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq network-manager || \
       warn "Instalacja network-manager nie powiodla sie."
   fi

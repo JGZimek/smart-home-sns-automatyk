@@ -118,7 +118,7 @@ Gdy jesteś przy makiecie i nie chcesz angażować Pi jako hosta:
 cd firmware/.pio/build/security_system/
 python -m http.server 8000                       # serwuj firmware.bin z komputera
 # w drugim terminalu ustal IP komputera (ipconfig / ip a), potem z Pi lub MQTT Explorer:
-mosquitto_pub -h rpi-smarthome.local -u esp32 -P esp32 \
+mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome \
   -t home/security/update -m "http://<IP-KOMPUTERA>:8000/firmware.bin"
 ```
 

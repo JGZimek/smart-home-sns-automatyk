@@ -27,8 +27,8 @@ import paho.mqtt.client as mqtt
 # ---------------- Konfiguracja ----------------
 BROKER_HOST = os.environ.get("BROKER_HOST", "127.0.0.1")
 BROKER_PORT = int(os.environ.get("MQTT_PORT", "1883"))
-BROKER_USER = os.environ.get("BROKER_USER", "esp32")
-BROKER_PASS = os.environ.get("BROKER_PASS", "esp32")
+BROKER_USER = os.environ.get("BROKER_USER", "smarthome")
+BROKER_PASS = os.environ.get("BROKER_PASS", "smarthome")
 EXPECTED_KINDS = [k.strip() for k in os.environ.get(
     "EXPECTED_KINDS", "security,access,environment").split(",") if k.strip()]
 DIAG_STALE_S = int(os.environ.get("DIAG_STALE_S", "90"))

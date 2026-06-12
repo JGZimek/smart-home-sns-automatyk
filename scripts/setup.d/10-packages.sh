@@ -4,6 +4,7 @@
 
 export DEBIAN_FRONTEND=noninteractive
 
+wait_for_apt
 log "Aktualizacja listy pakietow (apt update)..."
 apt-get update -qq
 

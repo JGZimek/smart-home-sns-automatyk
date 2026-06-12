@@ -58,6 +58,30 @@ load_config() {
 # Sprawdza, czy polecenie istnieje
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Czeka, az zwolni sie blokada apt/dpkg (swieze Ubuntu trzyma ja przez
+# unattended-upgrades na pierwszym bootcie). Bez tego instalator dlugo wisi
+# na "Waiting for cache lock".
+wait_for_apt() {
+  local locks="/var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock /var/lib/apt/lists/lock"
+  local waited=0 announced=0 l
+  while :; do
+    local busy=0
+    for l in $locks; do
+      if fuser "$l" >/dev/null 2>&1; then busy=1; break; fi
+    done
+    [ "$busy" -eq 0 ] && return 0
+    if [ "$announced" -eq 0 ]; then
+      warn "Apt/dpkg zajety przez inny proces (zwykle unattended-upgrades) – czekam az zwolni..."
+      announced=1
+    fi
+    sleep 5; waited=$((waited+5))
+    if [ "$waited" -ge 900 ]; then
+      warn "Blokada apt trzyma sie >15 min – probuje mimo to (apt sam poczeka)."
+      return 0
+    fi
+  done
+}
+
 # Wybór polecenia compose: "docker compose" (plugin v2) lub "docker-compose" (legacy)
 compose() {
   if docker compose version >/dev/null 2>&1; then

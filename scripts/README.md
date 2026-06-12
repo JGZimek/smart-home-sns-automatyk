@@ -19,7 +19,7 @@ To wszystko. Bootstrap klonuje repo do `/opt/smarthome` i uruchamia `setup.sh`, 
 1. instaluje Docker + pakiety (avahi, NetworkManager, mosquitto-clients, zram-tools, jq…),
 2. ustawia hostname **`rpi-smarthome`** i włącza **mDNS** (ESP-ki znajdują brokera jako `rpi-smarthome.local`),
 3. tuninguje system pod 24/7 na Zero 2W (Wi-Fi power-save off, **zram** swap, sprzętowy **watchdog**),
-4. tworzy konto brokera **`esp32`/`esp32`** i uruchamia **Mosquitto** (Docker, porty 1883 + 9001 WS),
+4. tworzy konto brokera **`smarthome`/`smarthome`** i uruchamia **Mosquitto** (Docker, porty 1883 + 9001 WS),
 5. instaluje usługi: monitor węzłów + web status, awaryjny AP Wi-Fi, opcjonalny LCD, watchdog brokera,
 6. instaluje **Tailscale** (`tailscale up --ssh`) do zdalnego dostępu.
 
@@ -137,7 +137,7 @@ ping rpi-smarthome.local               # czy mDNS działa (z innego urządzenia)
 | Objaw | Przyczyna / rozwiązanie |
 | :---- | :---------------------- |
 | ESP-ki nie łączą się | mDNS: `ping rpi-smarthome.local`. Broker: `smarthome status`. Sieć **2.4 GHz**. |
-| Broker odrzuca połączenia | Konto: setup tworzy `mosquitto/config/passwd` (`esp32`/`esp32`). `smarthome logs broker`. |
+| Broker odrzuca połączenia | Konto: setup tworzy `mosquitto/config/passwd` (`smarthome`/`smarthome`). `smarthome logs broker`. |
 | Brak `nodes.json` / dashboardu | `systemctl status smarthome-node-monitor`, `smarthome logs monitor`. |
 | AP `SmartHome-Config` nie wstaje | `journalctl -u smarthome-wifi-fallback`; wymaga NetworkManager + `wlan0`. |
 | Tailscale offline | `smarthome tailscale status`; zaloguj: `sudo tailscale up --ssh`. |

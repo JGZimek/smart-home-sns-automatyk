@@ -21,8 +21,8 @@
 // --- Wspólna infrastruktura sieciowa ---
 #define RPI_HOSTNAME      "rpi-smarthome"   // host mDNS brokera (Raspberry Pi)
 #define MQTT_BROKER_PORT  1883
-#define BROKER_USER       "esp32"
-#define BROKER_PASS       "esp32"
+#define BROKER_USER       "smarthome"
+#define BROKER_PASS       "smarthome"
 #define PROV_POP          "smarthome"       // Proof-of-Possession dla BLE provisioningu
 
 // --- Walidacja: dokładnie jeden moduł musi być wybrany ---
