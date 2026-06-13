@@ -5,8 +5,13 @@ MOSQ_CFG="$REPO_DIR/mosquitto/config"
 PASSWD_FILE="$MOSQ_CFG/passwd"
 B_USER="${BROKER_USER:-smarthome}"
 B_PASS="${BROKER_PASS:-smarthome}"
+# Mosquitto w obrazie eclipse-mosquitto dziala jako uzytkownik 'mosquitto' (uid:gid 1883).
+# Pliki, ktore ma czytac/zapisywac, musza nalezec do tego uid – inaczej "Unable to open pwfile".
+MOSQ_UID=1883
 
 mkdir -p "$MOSQ_CFG" "$REPO_DIR/mosquitto/data" "$REPO_DIR/mosquitto/log"
+# Dane i logi musza byc zapisywalne przez uid 1883 (persystencja mosquitto.db).
+chown -R "$MOSQ_UID:$MOSQ_UID" "$REPO_DIR/mosquitto/data" "$REPO_DIR/mosquitto/log" 2>/dev/null || true
 
 # --- Konto brokera (broker ma allow_anonymous false; firmware loguje sie B_USER/B_PASS) ---
 # Generujemy haslo komenda mosquitto_passwd uruchomiona w kontenerze – bez instalacji
@@ -15,11 +20,13 @@ if [ ! -f "$PASSWD_FILE" ] || ! grep -q "^${B_USER}:" "$PASSWD_FILE" 2>/dev/null
   log "Generuje konto brokera dla uzytkownika '$B_USER'..."
   docker run --rm -v "$MOSQ_CFG:/cfg" eclipse-mosquitto:2 \
     mosquitto_passwd -b -c /cfg/passwd "$B_USER" "$B_PASS"
-  chmod 0640 "$PASSWD_FILE" 2>/dev/null || true
   ok "Konto brokera utworzone ($PASSWD_FILE)."
 else
   ok "Konto brokera '$B_USER' juz istnieje."
 fi
+# Plik hasel musi byc czytelny dla uid 1883 (mosquitto w kontenerze) i nie szerzej.
+chown "$MOSQ_UID:$MOSQ_UID" "$PASSWD_FILE" 2>/dev/null || true
+chmod 0640 "$PASSWD_FILE" 2>/dev/null || true
 
 # --- Start / aktualizacja kontenera brokera ---
 log "Uruchamiam brokera MQTT (docker compose up -d)..."
