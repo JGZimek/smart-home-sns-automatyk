@@ -1,6 +1,8 @@
 # Serwer Smart Home na Raspberry Pi (plug-and-play)
 
 > Część dokumentacji projektu [Smart Home](../README.md). Zobacz też: [uruchomienie całości](../GETTING_STARTED.md).
+>
+> Kompletny runbook (instalacja od zera, dostęp przez Tailscale, dashboard, zmiana sieci, troubleshooting): **[DEPLOYMENT.md](../DEPLOYMENT.md)**. Ten plik to referencja techniczna (struktura, CLI, usługi).
 
 Kompletny, samonaprawiający się serwer makiety na **Raspberry Pi Zero 2W + Ubuntu Server**.
 Jedno polecenie stawia broker MQTT, mDNS, fallbacki sieciowe, zdalną diagnostykę ESP-ek i zdalny

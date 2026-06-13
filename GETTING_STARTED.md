@@ -37,7 +37,10 @@ Wszystkie urządzenia muszą być w **tej samej sieci Wi-Fi 2.4 GHz**. Pi udost�
 ## 1. Serwer: Raspberry Pi
 
 Cel: uruchomić brokera MQTT dostępnego jako `rpi-smarthome.local:1883`. Robi to **jedno polecenie** –
-plug-and-play instalator ustawia hostname, mDNS, konto brokera, autostart, fallbacki i zdalny dostęp.
+plug-and-play instalator ustawia hostname, mDNS, konto brokera, autostart i zdalny dostęp.
+
+> 📘 Pełny runbook serwera (od pustej karty, z dostępem przez Tailscale, dashboardem i zmianą sieci):
+> **[DEPLOYMENT.md](DEPLOYMENT.md)**. Poniżej skrócona wersja.
 
 ### 1.1. Przygotuj system
 - Wgraj na kartę SD **Ubuntu Server (64-bit)** i połącz się przez SSH.
