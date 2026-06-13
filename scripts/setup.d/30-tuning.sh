@@ -39,16 +39,29 @@ else
   ok "zram swap juz skonfigurowany."
 fi
 
-# --- 3. Sprzetowy watchdog (auto-reboot przy zawisie OS; bcm2835_wdt na RPi) ---
-if write_if_changed /etc/systemd/system.conf.d/10-watchdog.conf <<'EOF'
+# --- 3. Sprzetowy watchdog (OPT-IN, domyslnie OFF) ---
+# Na Zero 2W przy marginalnym zasilaniu watchdog zamienia chwilowy zawis/brownout
+# w twardy reboot. Wlaczaj swiadomie dopiero gdy zasilanie jest pewne (WATCHDOG_ENABLE=1).
+WDOG_FILE="/etc/systemd/system.conf.d/10-watchdog.conf"
+if [ "${WATCHDOG_ENABLE:-0}" = "1" ]; then
+  if write_if_changed "$WDOG_FILE" <<'EOF'
 # Smart Home: sprzetowy watchdog – reboot gdy systemd przestanie go karmic.
 [Manager]
 RuntimeWatchdogSec=15s
 RebootWatchdogSec=2min
 EOF
-then
-  log "Watchdog sprzetowy skonfigurowany (wymaga reboota by w pelni zadzialal)."
-  systemctl daemon-reexec || true
+  then
+    log "Watchdog sprzetowy WLACZONY (wymaga reboota by w pelni zadzialal)."
+    systemctl daemon-reexec || true
+  else
+    ok "Watchdog juz skonfigurowany."
+  fi
 else
-  ok "Watchdog juz skonfigurowany."
+  if [ -f "$WDOG_FILE" ]; then
+    log "Watchdog wylaczony (WATCHDOG_ENABLE=0) – usuwam wczesniejsza konfiguracje."
+    rm -f "$WDOG_FILE"
+    systemctl daemon-reexec || true
+  else
+    ok "Watchdog wylaczony (WATCHDOG_ENABLE=0)."
+  fi
 fi
