@@ -35,9 +35,10 @@ Otwórz partycję **`system-boot`** → plik **`user-data`** → dopisz na końc
 ```yaml
 runcmd:
   - [ sh, -c, "curl -fsSL https://tailscale.com/install.sh | sh" ]
-  - [ tailscale, up, "--ssh", "--hostname=rpi-smarthome", "--authkey=tskey-auth-WKLEJ-TUTAJ" ]
+  - [ tailscale, up, "--ssh", "--hostname=rpi-smarthome", "--authkey=WKLEJ_TU_KLUCZ" ]
 ```
-Jeśli `runcmd:` już istnieje — dopisz tylko dwie linie `- [...]` pod nim. Zapisz, wysuń kartę.
+Jeśli `runcmd:` już istnieje — dopisz tylko dwie linie `- [...]` pod nim. W `--authkey=` wstaw klucz
+skopiowany w §1.1 (zaczyna się od `tskey-auth-`). Zapisz, wysuń kartę.
 
 > **Bez Tailscale prebake:** alternatywnie znajdź IP Pi skanem LAN (`arp -a` + MAC `b8-27-eb|dc-a6-32|e4-5f-01|2c-cf-67`) — ale działa tylko w sieci bez izolacji klientów.
 
