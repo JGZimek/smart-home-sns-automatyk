@@ -48,10 +48,12 @@ require_root() {
 # Najpierw .example (defaulty), potem realny plik (nadpisuje).
 load_config() {
   set -a
+  # -r (nie -f): jesli plik istnieje, ale jest nieczytelny dla biezacego uzytkownika,
+  # nie wywalaj CLI – uzyj wartosci domyslnych z .example.
   # shellcheck disable=SC1090
-  [ -f "$SCRIPTS_DIR/smarthome.env.example" ] && . "$SCRIPTS_DIR/smarthome.env.example"
+  [ -r "$SCRIPTS_DIR/smarthome.env.example" ] && . "$SCRIPTS_DIR/smarthome.env.example"
   # shellcheck disable=SC1090
-  [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+  [ -r "$CONFIG_FILE" ] && . "$CONFIG_FILE"
   set +a
 }
 

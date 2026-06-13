@@ -12,6 +12,10 @@ fi
 for grp in docker i2c gpio; do
   getent group "$grp" >/dev/null 2>&1 && usermod -aG "$grp" "$SERVICE_USER" || true
 done
+# Konfiguracja czytelna dla uslug i CLI uruchamianego przez uzytkownika (nie tylko root).
+chown "root:$SERVICE_USER" "$CONFIG_FILE" 2>/dev/null || true
+chmod 0640 "$CONFIG_FILE" 2>/dev/null || true
+
 # Stan (nodes.json) musi byc zapisywalny przez usluge.
 mkdir -p "$STATE_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
