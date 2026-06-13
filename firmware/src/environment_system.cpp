@@ -132,21 +132,33 @@ static void control_task(void *pvParameters) {
     }
 }
 
+// Instaluje magistralę I2C starym sterownikiem (dla surowych odczytów INA219/TSL2591).
+// Używane jako fallback, gdy i2cdev nie przejęło portu. Błąd „already installed"
+// jest celowo ignorowany — istotne jest tylko, by sterownik na porcie był dostępny.
+static void ensure_i2c_bus_installed(void) {
+    i2c_config_t conf = {};
+    conf.mode = I2C_MODE_MASTER;
+    conf.sda_io_num = I2C_MASTER_SDA_IO;
+    conf.scl_io_num = I2C_MASTER_SCL_IO;
+    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
+    conf.clk_flags = I2C_SCLK_SRC_FLAG_FOR_NOMAL;
+    i2c_param_config(I2C_MASTER_NUM, &conf);
+    i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
+}
+
 // --- ZADANIE: ODCZYT CZUJNIKÓW I PUBLIKACJA ---
 static void sensor_task(void *pvParameters) {
     ESP_LOGI(TAG_ENV, "Sensor Task Started");
 
-    // 1. Inicjalizacja TSL2591 sprzętowo
-    bool tsl_ok = init_tsl2591();
-    if (tsl_ok) ESP_LOGI(TAG_ENV, "TSL2591 odnaleziony i zainicjowany");
-    else ESP_LOGE(TAG_ENV, "Nie odnaleziono TSL2591");
-
-    // 2. Inicjalizacja BME280 z zewnętrznej biblioteki esp-idf-lib
+    // 1. BME280 jako PIERWSZY — biblioteka i2cdev przejmuje (instaluje) magistralę I2C.
+    //    Dzięki temu na porcie jest tylko JEDEN sterownik (legacy), bez konfliktu driver_ng.
     bmp280_t bme_dev;
     memset(&bme_dev, 0, sizeof(bmp280_t));
     bool bme_ok = false;
-    
-    if (i2cdev_init() == ESP_OK) { 
+
+    if (i2cdev_init() == ESP_OK) {
         if (bmp280_init_desc(&bme_dev, BMP280_I2C_ADDRESS_0, I2C_MASTER_NUM, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO) == ESP_OK) {
             bmp280_params_t params;
             bmp280_init_default_params(&params);
@@ -157,7 +169,15 @@ static void sensor_task(void *pvParameters) {
             }
         }
     }
-    if (!bme_ok) ESP_LOGE(TAG_ENV, "Nie odnaleziono BME280/BMP280");
+    if (!bme_ok) {
+        ESP_LOGE(TAG_ENV, "Nie odnaleziono BME280/BMP280");
+        ensure_i2c_bus_installed(); // gdy i2cdev nie postawiło magistrali — dla INA219/TSL2591
+    }
+
+    // 2. TSL2591 — surowy odczyt na już zainstalowanej magistrali
+    bool tsl_ok = init_tsl2591();
+    if (tsl_ok) ESP_LOGI(TAG_ENV, "TSL2591 odnaleziony i zainicjowany");
+    else ESP_LOGE(TAG_ENV, "Nie odnaleziono TSL2591");
 
     char payload[128];
 
@@ -230,17 +250,8 @@ void init_environment_system(void) {
     gpio_set_level(PIN_FAN_COOLING, 1);
     gpio_set_level(PIN_FAN_VENT, 1);
 
-    // 2. Inicjalizacja sprzętowa sterownika I2C
-    i2c_config_t conf = {};
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_MASTER_SDA_IO;
-    conf.scl_io_num = I2C_MASTER_SCL_IO;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
-    conf.clk_flags = I2C_SCLK_SRC_FLAG_FOR_NOMAL;
-    ESP_ERROR_CHECK(i2c_param_config(I2C_MASTER_NUM, &conf));
-    ESP_ERROR_CHECK(i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0));
+    // 2. Magistralę I2C stawia sensor_task przez i2cdev (jeden właściciel portu,
+    //    bez konfliktu starego i nowego sterownika I2C).
 
     // 3. Utworzenie kolejki sterującej
     cmdQueue = xQueueCreate(10, sizeof(FanCommand));
