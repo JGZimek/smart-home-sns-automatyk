@@ -58,7 +58,8 @@ Wybierz według tego, **co chcesz zrobić**:
 |  Rozwijam / kompiluję firmware | [firmware/README.md](firmware/README.md) |
 |  Konfiguruję Wi-Fi w module ESP32 | [firmware/WIFI_PROVISIONING.md](firmware/WIFI_PROVISIONING.md) |
 |  Aktualizuję firmware zdalnie (OTA) | [firmware/OTA_UPDATE.md](firmware/OTA_UPDATE.md) |
-|  Stawiam serwer na Raspberry Pi | [scripts/README.md](scripts/README.md) |
+|  **Uruchamiam / obsługuję serwer RPi** (od zera, dostęp, zmiana sieci) | **[DEPLOYMENT.md](DEPLOYMENT.md)** |
+|  Serwer RPi – referencja techniczna (CLI, usługi) | [scripts/README.md](scripts/README.md) |
 
 ---
 
