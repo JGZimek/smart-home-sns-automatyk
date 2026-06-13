@@ -25,6 +25,15 @@ static bool mdns_initialized = false;
 static int s_retry_cnt = 0;
 #define MAX_RETRY_BEFORE_FALLBACK 5
 static bool s_provisioning_active = false;
+static bool s_prov_mgr_inited = false;        // czy menedżer provisioningu jest zainicjowany
+static bool s_broker_connected = false;       // czy KIEDYKOLWIEK od startu udało się połączyć z brokerem
+static bool s_broker_watchdog_started = false;
+
+// Po ilu sekundach od uzyskania IP — gdy broker NIGDY nie był osiągalny — wrócić do BLE
+// provisioningu. Chroni przed utknięciem na sieci bez brokera (np. po zmianie lokalizacji
+// albo gdy zapisana jest stara, nieaktualna sieć). NIE dotyczy węzła, który raz połączył
+// się z brokerem, więc chwilowa awaria brokera na działającej makiecie nie wymusza parowania.
+#define BROKER_PROV_TIMEOUT_S 180
 
 void ota_update_task(void *pvParameter)
 {
@@ -143,6 +152,45 @@ esp_err_t resolve_rpi_ip(char *out_ip_uri, size_t max_len)
     return ESP_FAIL;
 }
 
+// Uruchamia BLE provisioning, w razie potrzeby reinicjalizując menedżer (po uzyskaniu IP
+// jest on zwalniany dla oszczędności RAM). Zapisane poświadczenia NIE są kasowane —
+// dopiero podanie nowej sieci w aplikacji je nadpisze.
+static void start_ble_provisioning(void)
+{
+    if (s_provisioning_active) return;
+    s_provisioning_active = true;
+
+    if (!s_prov_mgr_inited) {
+        wifi_prov_mgr_config_t config = {};
+        config.scheme = wifi_prov_scheme_ble;
+        config.scheme_event_handler = WIFI_PROV_EVENT_HANDLER_NONE;
+        ESP_ERROR_CHECK(wifi_prov_mgr_init(config));
+        s_prov_mgr_inited = true;
+    }
+    ESP_LOGW(TAG_PROV, "Uruchamiam BLE provisioning (%s). Mozna wskazac nowa siec Wi-Fi.", PROV_BLE_NAME);
+    wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
+    ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)PROV_POP, PROV_BLE_NAME, NULL));
+}
+
+// Wołane przez warstwę MQTT po udanym połączeniu z brokerem — wyłącza watchdog provisioningu.
+void network_notify_broker_connected(void)
+{
+    s_broker_connected = true;
+}
+
+// Watchdog: jeśli mimo połączenia z Wi-Fi broker pozostaje nieosiągalny i nigdy nie udało
+// się z nim połączyć od startu, wracamy do BLE provisioningu, aby umożliwić zmianę sieci
+// bez podłączania kabla.
+static void broker_watchdog_task(void *arg)
+{
+    vTaskDelay(pdMS_TO_TICKS(BROKER_PROV_TIMEOUT_S * 1000));
+    if (!s_broker_connected && !s_provisioning_active) {
+        ESP_LOGE(TAG_PROV, "Broker nieosiagalny przez %ds mimo polaczenia z Wi-Fi. Wracam do BLE provisioning.", BROKER_PROV_TIMEOUT_S);
+        start_ble_provisioning();
+    }
+    vTaskDelete(NULL);
+}
+
 static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_PROV_EVENT) {
@@ -150,21 +198,29 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int3
             s_provisioning_active = true;
         } else if (event_id == WIFI_PROV_END) {
             wifi_prov_mgr_deinit();
+            s_prov_mgr_inited = false;
         }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         if (!s_provisioning_active) {
             esp_wifi_connect();
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        s_retry_cnt = 0; 
-        
+        s_retry_cnt = 0;
+
         if (!s_provisioning_active) {
             ESP_LOGI(TAG_PROV, "Polaczono automatycznie z pamieci NVS. Zwalniam menedzer BLE.");
             wifi_prov_mgr_deinit();
+            s_prov_mgr_inited = false;
         }
-        
+
+        // Watchdog brokera startuje raz, po pierwszym uzyskaniu IP.
+        if (!s_broker_watchdog_started) {
+            s_broker_watchdog_started = true;
+            xTaskCreate(broker_watchdog_task, "broker_wd", 3072, NULL, 3, NULL);
+        }
+
         xTaskCreate(mqtt_discovery_task, "mqtt_discovery_task", 4096, NULL, 3, NULL);
-        
+
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         if (!s_provisioning_active) {
             if (s_retry_cnt < MAX_RETRY_BEFORE_FALLBACK) {
@@ -173,9 +229,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int3
                 esp_wifi_connect();
             } else {
                 ESP_LOGE(TAG_PROV, "Makieta stracila dostep do sieci! Uruchamiam awaryjny BLE Provisioning (%s).", PROV_BLE_NAME);
-                s_provisioning_active = true;
-                wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-                ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)PROV_POP, PROV_BLE_NAME, NULL));
+                start_ble_provisioning();
             }
         }
     }
@@ -197,14 +251,13 @@ void wifi_init_and_prov(void)
     config.scheme = wifi_prov_scheme_ble;
     config.scheme_event_handler = WIFI_PROV_EVENT_HANDLER_NONE;
     ESP_ERROR_CHECK(wifi_prov_mgr_init(config));
+    s_prov_mgr_inited = true;
 
     bool provisioned = false;
     ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
 
     if (!provisioned) {
-        s_provisioning_active = true;
-        wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, (const void *)PROV_POP, PROV_BLE_NAME, NULL));
+        start_ble_provisioning();
     } else {
         ESP_LOGI(TAG_PROV, "Dane Wi-Fi obecne we flashu. Uruchamiam probe polaczenia...");
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));

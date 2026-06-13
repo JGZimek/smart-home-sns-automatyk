@@ -20,9 +20,9 @@
 
 static const char *TAG = "MAIN";
 
-void setupModule() { 
+void setupModule() {
     ESP_LOGW(TAG, "=============================================");
-    ESP_LOGW(TAG, "Wersja v2.0: Moduł %s ", MODULE_NAME);
+    ESP_LOGW(TAG, "Firmware v%s: Modul %s", FIRMWARE_VERSION, MODULE_NAME);
     ESP_LOGW(TAG, "=============================================");
 }
 
