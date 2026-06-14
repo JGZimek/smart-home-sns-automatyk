@@ -1,0 +1,13 @@
+[Unit]
+Description=Smart Home – samoaktualizacja serwera (git pull + ponowny setup)
+# Wyzwalana plikiem /var/lib/smarthome/update_request (np. z dashboardu) przez
+# smarthome-update.path. Dziala jako root – dlatego web (user smarthome) NIE
+# uruchamia 'smarthome update' bezposrednio, tylko prosi przez plik-wyzwalacz.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Najpierw kasujemy wyzwalacz, by nieudana aktualizacja nie zapetlala uruchomien.
+ExecStartPre=-/bin/rm -f /var/lib/smarthome/update_request
+ExecStart=/usr/local/bin/smarthome update

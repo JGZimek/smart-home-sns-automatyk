@@ -40,12 +40,18 @@ ok "Srodowisko Pythona gotowe."
 
 # --- 3. Instalacja unitow systemd ---
 log "Instaluje uslugi systemd..."
-install -m 0644 "$SCRIPTS_DIR"/systemd/*.service "$SCRIPTS_DIR"/systemd/*.timer /etc/systemd/system/
+install -m 0644 "$SCRIPTS_DIR"/systemd/*.service "$SCRIPTS_DIR"/systemd/*.timer \
+        "$SCRIPTS_DIR"/systemd/*.path /etc/systemd/system/
 systemctl daemon-reload
 
 # Monitor wezlow + web status (zawsze)
 systemctl enable --now smarthome-node-monitor.service
 ok "Usluga monitora wezlow aktywna."
+
+# Samoaktualizacja: .path nasluchuje pliku-wyzwalacza (z dashboardu / 'touch').
+# Sama usluga update jest oneshot i NIE jest enable'owana – odpala ja .path.
+systemctl enable --now smarthome-update.path
+ok "Wyzwalacz samoaktualizacji aktywny (przycisk 'Aktualizuj' w dashboardzie)."
 
 # Health timer (watchdog brokera + publikacja zdrowia Pi)
 systemctl enable --now smarthome-health.timer

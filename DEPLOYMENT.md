@@ -163,7 +163,12 @@ Wszystkie nastawy w jednym pliku. Po edycji: `sudo smarthome update` (lub restar
 ---
 
 ## 5. Aktualizacja i OTA
-- **Serwer:** `sudo smarthome update` (git pull + ponowny setup, idempotentnie).
+- **Serwer (CLI):** `sudo smarthome update` (git pull + ponowny setup + restart usług, idempotentnie).
+  Pi **nie aktualizuje się samo** — to świadoma akcja.
+- **Serwer (z dashboardu):** przycisk **„Sprawdz i zainstaluj aktualizacje"** na karcie serwera
+  (`http://rpi-smarthome.local:8080`). Web (user `smarthome`) tworzy plik-wyzwalacz, a rootowa usługa
+  `smarthome-update` wykonuje to samo co `smarthome update`. Wynik (wersja, „nowa/bez zmian") pojawia się
+  na karcie serwera po odświeżeniu. Wyłącznik: `WEB_UPDATE_ENABLE=0` (gdy dashboard wystawiony poza zaufany LAN/Tailscale).
 - **Firmware ESP (zdalnie):** `smarthome ota <kind> <plik.bin>` lub z GitHub Actions — patrz
   [firmware/OTA_UPDATE.md](firmware/OTA_UPDATE.md).
 

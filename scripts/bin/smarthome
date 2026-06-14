@@ -251,10 +251,32 @@ cmd_wifi() {
 
 cmd_update() {
   [ "$(id -u)" -eq 0 ] || die "Aktualizacja wymaga sudo: sudo smarthome update"
-  log "Aktualizuje repo ($REPO_DIR)..."
-  git -C "$REPO_DIR" pull --ff-only
+  local status_file="$STATE_DIR/update_status.json"
+  local before after changed=0 ok=1
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+  # Git jako root w repo nalezacym do innego usera -> unikamy "dubious ownership".
+  git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+  before="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  printf '{"state":"running","started":"%s","before":"%s"}\n' "$(date -Is)" "$before" \
+    > "$status_file" 2>/dev/null || true
+
+  log "Sprawdzam i pobieram zmiany ($REPO_DIR)..."
+  git -C "$REPO_DIR" pull --ff-only || ok=0
+  after="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  [ "$before" != "$after" ] && changed=1
+  [ "$changed" = "1" ] && log "Nowa wersja: $before -> $after" || log "Brak nowych zmian (wersja $after)."
+
   log "Uruchamiam ponownie setup..."
-  bash "$SCRIPTS_DIR/setup.sh"
+  bash "$SCRIPTS_DIR/setup.sh" || ok=0
+
+  # Restart uslug aplikacyjnych, by zmiany w ich kodzie weszly w zycie (enable --now
+  # samo nie restartuje juz dzialajacej uslugi). try-restart = tylko gdy aktywna.
+  systemctl try-restart smarthome-node-monitor smarthome-wifi-fallback smarthome-lcd 2>/dev/null || true
+
+  printf '{"state":"done","finished":"%s","before":"%s","after":"%s","changed":%s,"ok":%s}\n' \
+    "$(date -Is)" "$before" "$after" "$changed" "$ok" > "$status_file" 2>/dev/null || true
+  [ "$ok" = "1" ] && ok "Aktualizacja zakonczona." || die "Aktualizacja zakonczona z bledami (patrz wyzej)."
 }
 
 main() {

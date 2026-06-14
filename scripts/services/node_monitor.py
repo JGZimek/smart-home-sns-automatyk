@@ -34,8 +34,15 @@ EXPECTED_KINDS = [k.strip() for k in os.environ.get(
 DIAG_STALE_S = int(os.environ.get("DIAG_STALE_S", "90"))
 WEB_ENABLE = os.environ.get("WEB_ENABLE", "1") == "1"
 WEB_PORT = int(os.environ.get("WEB_PORT", "8080"))
+# Przycisk "Aktualizuj serwer" w dashboardzie (POST /update -> plik-wyzwalacz ->
+# rootowa usluga smarthome-update). Wylacz (0), jesli dashboard jest wystawiony
+# szerzej niz zaufany LAN/Tailscale – to zdalne wywolanie aktualizacji jako root.
+WEB_UPDATE_ENABLE = os.environ.get("WEB_UPDATE_ENABLE", "1") == "1"
 HOSTNAME = os.environ.get("HOSTNAME", socket.gethostname())
 STATE_FILE = os.environ.get("STATE_FILE", "/var/lib/smarthome/nodes.json")
+# Plik-wyzwalacz samoaktualizacji (tworzy go web jako user 'smarthome', usuwa root).
+UPDATE_REQUEST_FILE = os.environ.get("UPDATE_REQUEST_FILE", "/var/lib/smarthome/update_request")
+UPDATE_STATUS_FILE = os.environ.get("UPDATE_STATUS_FILE", "/var/lib/smarthome/update_status.json")
 # Katalog z plikami firmware serwowanymi po HTTP dla OTA (ESP pobiera stad firmware.bin).
 FIRMWARE_DIR = os.environ.get("FIRMWARE_DIR", "/var/lib/smarthome/firmware")
 SERVER_KIND = "system"  # Pi publikuje sie jako home/system/server/*
@@ -55,6 +62,14 @@ def log(msg):
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def read_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
 # ---------------- Zbieranie metryk Pi ----------------
@@ -269,14 +284,22 @@ DASH_HTML = """<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8">
 <div class="sub">%(host)s &middot; odswiezono %(ts)s &middot; auto-refresh 10s</div></header>
 <div class="wrap">%(cards)s</div>
 <div class="foot">JSON: <a style="color:#58a6ff" href="/api/nodes">/api/nodes</a> &middot; health: /healthz</div>
+<script>
+function doUpdate(){
+ if(!confirm('Pobrac i zainstalowac aktualizacje serwera? Pi wykona git pull i ponowny setup.'))return;
+ fetch('/update',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+  alert(d.triggered?'Aktualizacja uruchomiona. Odswiez strone za okolo minute.':('Niedostepne: '+(d.error||'?')));
+ }).catch(function(e){alert('Blad: '+e);});
+}
+</script>
 </body></html>"""
 
 
-def render_card(title, badge, rows, extra_class=""):
+def render_card(title, badge, rows, extra_class="", extra_html=""):
     rows_html = "".join(
         '<div class="row"><span>%s</span><b>%s</b></div>' % (k, v) for k, v in rows)
-    return ('<div class="card %s"><h2>%s<span class="badge %s">%s</span></h2>%s</div>'
-            % (extra_class, title, badge, badge.upper(), rows_html))
+    return ('<div class="card %s"><h2>%s<span class="badge %s">%s</span></h2>%s%s</div>'
+            % (extra_class, title, badge, badge.upper(), rows_html, extra_html))
 
 
 def render_dashboard():
@@ -291,7 +314,23 @@ def render_dashboard():
         ("RAM wolny", ("%s/%s MB" % (s.get("mem_avail_mb"), s.get("mem_total_mb")))),
         ("Uptime", "%s s" % s.get("host_uptime_s")),
     ]
-    cards.append(render_card("SERWER (Pi)", "online", srv_rows, "server"))
+    # Wersja serwera + wynik ostatniej aktualizacji (z pliku statusu pisanego przez 'smarthome update').
+    upd = read_json(UPDATE_STATUS_FILE)
+    if upd:
+        ver = upd.get("after") or upd.get("before") or "-"
+        srv_rows.append(("Wersja", ver))
+        if upd.get("state") == "running":
+            srv_rows.append(("Aktualizacja", "w toku..."))
+        elif upd.get("state") == "done":
+            res = "OK" if upd.get("ok") else "BLAD"
+            res += " (nowa wersja)" if upd.get("changed") else " (bez zmian)"
+            srv_rows.append(("Ost. update", res))
+    update_btn = ""
+    if WEB_UPDATE_ENABLE:
+        update_btn = ('<button onclick="doUpdate()" style="margin-top:10px;width:100%;'
+                      'padding:9px;background:#2f6feb;color:#fff;border:0;border-radius:6px;'
+                      'cursor:pointer;font-size:13px">Sprawdz i zainstaluj aktualizacje</button>')
+    cards.append(render_card("SERWER (Pi)", "online", srv_rows, "server", update_btn))
     # Karty wezlow ESP
     for kind in sorted(snap["nodes"].keys()):
         n = snap["nodes"][kind]
@@ -326,12 +365,43 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/nodes"):
             self._send(200, json.dumps(snapshot(), ensure_ascii=False, indent=2),
                        "application/json; charset=utf-8")
+        elif self.path.startswith("/api/update-status"):
+            self._send(200, json.dumps(read_json(UPDATE_STATUS_FILE), ensure_ascii=False),
+                       "application/json; charset=utf-8")
         elif self.path.startswith("/healthz"):
             self._send(200, "ok\n", "text/plain")
         elif self.path.startswith("/firmware/"):
             self._serve_firmware()
         elif self.path == "/" or self.path.startswith("/index"):
             self._send(200, render_dashboard())
+        else:
+            self._send(404, "not found\n", "text/plain")
+
+    def do_POST(self):
+        # Pochlon ewentualne cialo zadania (zeby keep-alive nie zglupial).
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if length:
+                self.rfile.read(length)
+        except (ValueError, TypeError):
+            pass
+
+        if self.path.rstrip("/") == "/update":
+            if not WEB_UPDATE_ENABLE:
+                self._send(403, json.dumps({"triggered": False, "error": "wylaczone (WEB_UPDATE_ENABLE=0)"}),
+                           "application/json; charset=utf-8")
+                return
+            try:
+                # Web dziala jako user 'smarthome' (wlasciciel STATE_DIR) – moze utworzyc wyzwalacz.
+                # Rootowa .path-unit wykryje plik i odpali 'smarthome update'.
+                os.makedirs(os.path.dirname(UPDATE_REQUEST_FILE), exist_ok=True)
+                with open(UPDATE_REQUEST_FILE, "w") as f:
+                    f.write(now_iso())
+                log("Zlecono aktualizacje z dashboardu (utworzono %s)" % UPDATE_REQUEST_FILE)
+                self._send(200, json.dumps({"triggered": True}), "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(500, json.dumps({"triggered": False, "error": str(e)}),
+                           "application/json; charset=utf-8")
         else:
             self._send(404, "not found\n", "text/plain")
 

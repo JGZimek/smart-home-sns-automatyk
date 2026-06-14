@@ -1,0 +1,11 @@
+[Unit]
+Description=Smart Home – wyzwalacz samoaktualizacji (plik update_request)
+# Gdy pojawi sie plik-wyzwalacz (tworzy go dashboard lub `touch`), uruchom
+# smarthome-update.service (git pull + setup) z uprawnieniami root.
+
+[Path]
+PathExists=/var/lib/smarthome/update_request
+Unit=smarthome-update.service
+
+[Install]
+WantedBy=multi-user.target
