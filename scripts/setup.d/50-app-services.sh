@@ -54,33 +54,34 @@ systemctl enable --now smarthome-update.path
 ok "Wyzwalacz samoaktualizacji aktywny (przycisk 'Aktualizuj' w dashboardzie)."
 
 # Sterowanie Wi-Fi z dashboardu: .path wykonuje zadania (connect/scan/portal) jako root.
-# Ma sens tylko gdy Wi-Fi jest pod NetworkManagerem (po 'smarthome wifi migrate-nm').
-if have nmcli; then
+# Wlaczamy TYLKO gdy NM realnie zarzadza wlan0 – inaczej na systemie z networkd
+# usluga byla bezuzyteczna (a jej obecnosc mylila). Gate przez nm_manages_wlan0.
+if nm_manages_wlan0; then
   systemctl enable --now smarthome-wifi-apply.path
   ok "Sterowanie Wi-Fi z dashboardu aktywne."
 else
   systemctl disable --now smarthome-wifi-apply.path >/dev/null 2>&1 || true
-  log "Sterowanie Wi-Fi z dashboardu pominiete (brak NetworkManager – zob. 'smarthome wifi migrate-nm')."
+  log "Sterowanie Wi-Fi z dashboardu pominiete (NM nie zarzadza wlan0 – zob. 'smarthome wifi migrate-nm')."
 fi
 
 # Health timer (watchdog brokera + publikacja zdrowia Pi)
 systemctl enable --now smarthome-health.timer
 ok "Timer health (watchdog brokera) aktywny."
 
-# AP fallback – tylko gdy SWIADOMIE wlaczony (wymaga NetworkManager na wlan0).
-if [ "${AP_FALLBACK_ENABLE:-0}" = "1" ]; then
-  if ! have nmcli; then
-    warn "AP fallback wymaga NetworkManager – instaluje pakiet."
-    warn "Jesli laczysz sie przez Wi-Fi pod networkd, NAJPIERW zmigruj sie do NM (Etap 3.5)!"
-    wait_for_apt
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq network-manager || \
-      warn "Instalacja network-manager nie powiodla sie."
-  fi
+# AP fallback – tylko gdy SWIADOMIE wlaczony I NM faktycznie zarzadza wlan0.
+# Bez tego drugiego warunku na networkd usluga kreci sie w pustej petli (nie ma
+# czym podniesc AP). Migracja: 'smarthome wifi migrate-nm' + reboot.
+if [ "${AP_FALLBACK_ENABLE:-0}" = "1" ] && nm_manages_wlan0; then
   systemctl enable --now smarthome-wifi-fallback.service
   ok "Awaryjny Access Point Wi-Fi aktywny (SSID: ${AP_SSID:-SmartHome-Config})."
 else
   systemctl disable --now smarthome-wifi-fallback.service >/dev/null 2>&1 || true
-  log "AP fallback wylaczony (AP_FALLBACK_ENABLE=0) – domyslnie. Wlacz po migracji Wi-Fi do NM."
+  if [ "${AP_FALLBACK_ENABLE:-0}" = "1" ]; then
+    warn "AP fallback wlaczony w configu, ale NM nie zarzadza wlan0 – POMIJAM."
+    warn "Uruchom 'sudo smarthome wifi migrate-nm <ssid> <haslo>' i zrestartuj Pi."
+  else
+    log "AP fallback wylaczony (AP_FALLBACK_ENABLE=0)."
+  fi
 fi
 
 # LCD – auto-detekcja / wymuszenie / wylaczenie

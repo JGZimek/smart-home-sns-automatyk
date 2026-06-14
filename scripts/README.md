@@ -101,21 +101,28 @@ Broker, mDNS, OTA, Tailscale, dashboard i watchdogi **działają niezależnie od
 **nie** instaluje NetworkManagera (instalacja NM po Wi-Fi przejęłaby `wlan0` i zerwała połączenie).
 Power-save wyłączamy renderer-agnostycznie przez `iw` (usługa `wifi-powersave-off`).
 
-Awaryjny AP wymaga jednak NM. Migracja jest zautomatyzowana **jedną komendą** (pre-tworzy profil NM
-z Twoimi danymi, żeby połączenie nie padło, i przełącza renderer):
+Awaryjny AP wymaga jednak NM. Migracja jest zautomatyzowana **jedną komendą**, ale przełączenie
+następuje dopiero **po reboocie** (bezpiecznie – komenda niczego nie zrywa na żywo):
 
 ```bash
-# URUCHOM PRZEZ TAILSCALE (100.x) lub z konsoli HDMI – wlan0 na chwilę zerwie!
+# 1. Przygotuj (NIE zrywa sieci; zapisuje profil NM offline + przełącza renderer):
 sudo smarthome wifi migrate-nm "<TWOJ_SSID>" "<HASLO>"
 
-# następnie włącz fallback w /etc/smarthome/smarthome.env:  AP_FALLBACK_ENABLE=1
+# 2. Restart = czyste przejęcie wlan0 przez NM.  MIEJ KONSOLĘ HDMI POD RĘKĄ
+#    (jeśli NM nie połączy, Tailscale też padnie – brak innej drogi do sieci).
+sudo reboot
+
+# 3. Po reboocie (wlan0 = connected pod NM): włącz fallback i przeładuj usługi:
+sudo sed -i 's/^AP_FALLBACK_ENABLE=.*/AP_FALLBACK_ENABLE=1/' /etc/smarthome/smarthome.env
 sudo smarthome update
-smarthome status        # powinno pokazać smarthome-wifi-fallback active
+smarthome status        # smarthome-wifi-fallback -> active
 ```
 
-`migrate-nm` instaluje NetworkManagera, tworzy profil bieżącej sieci, ustawia `renderer: NetworkManager`
-w netplan i weryfikuje, czy `wlan0` jest „managed". Awaryjny powrót (z konsoli):
-`sudo rm /etc/netplan/99-networkmanager.yaml && sudo netplan apply`.
+`migrate-nm` instaluje NetworkManagera, zapisuje **profil NM offline** (keyfile z autoconnect, bez
+uruchamiania NM teraz → brak konfliktu o `wlan0`), ustawia `renderer: NetworkManager` i **wyłącza
+zarządzanie siecią przez cloud-init** (inaczej networkd po reboocie znów przejmie `wlan0` → stan
+`unavailable`). Awaryjny powrót (z konsoli):
+`sudo rm /etc/netplan/99-networkmanager.yaml /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg && sudo netplan apply`.
 
 Po migracji działają też: `sudo smarthome wifi connect "SSID" "HASLO"` (przepięcie sieci) oraz
 `sudo smarthome wifi portal` (wymuszony AP konfiguracyjny na żądanie).

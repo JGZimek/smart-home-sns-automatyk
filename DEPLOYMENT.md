@@ -129,13 +129,17 @@ automatycznego AP fallback (usługa `smarthome-wifi-fallback`), który podnosi s
 łączności.
 
 **Wymóg:** `connect`/`portal`/AP fallback działają tylko gdy Wi-Fi jest pod **NetworkManagerem**
-(Ubuntu Server używa networkd). Włącz to **raz**, jedną komendą (uruchom przez Tailscale `100.x` lub konsolę HDMI):
+(Ubuntu Server używa networkd). Przełączenie następuje **po reboocie** — komenda niczego nie zrywa na żywo:
 
 ```bash
-sudo smarthome wifi migrate-nm "<TWOJ_SSID>" "<HASLO>"   # wlan0 na chwile zerwie
-# w /etc/smarthome/smarthome.env:  AP_FALLBACK_ENABLE=1
+sudo smarthome wifi migrate-nm "<TWOJ_SSID>" "<HASLO>"   # przygotowanie (bez zrywania sieci)
+sudo reboot                                              # MIEJ KONSOLĘ HDMI – po reboocie NM przejmuje wlan0
+# po reboocie:
+sudo sed -i 's/^AP_FALLBACK_ENABLE=.*/AP_FALLBACK_ENABLE=1/' /etc/smarthome/smarthome.env
 sudo smarthome update
 ```
+⚠️ Jeśli po reboocie NM nie połączy z Wi-Fi, **Tailscale też padnie** — stąd wymóg konsoli HDMI przy
+pierwszej migracji. Powrót: `sudo rm /etc/netplan/99-networkmanager.yaml /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg && sudo netplan apply`.
 
 - Alternatywnie ręcznie: `sudo nmcli dev wifi connect "<SSID>" password "<HASLO>"`.
 - Tailscale i konto brokera nie wymagają zmian. mDNS (`rpi-smarthome.local`) działa dalej po połączeniu.

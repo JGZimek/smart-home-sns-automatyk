@@ -247,10 +247,10 @@ cmd_wifi() {
       _wifi_need_root
       local ssid="${1:-}" pass="${2:-}"
       [ -z "$ssid" ] && ssid="$(iwgetid -r 2>/dev/null || true)"
-      [ -z "$ssid" ] && die "Uzycie: sudo smarthome wifi migrate-nm <SSID> <HASLO>  (podaj SWOJA siec, by nie stracic polaczenia)"
-      warn "Migracja Wi-Fi do NetworkManagera – wlan0 na chwile zerwie polaczenie."
-      warn "URUCHOM PRZEZ TAILSCALE (100.x) lub Z KONSOLI HDMI, inaczej ryzykujesz lockout."
-      warn "Awaryjny powrot (tylko z konsoli): sudo rm /etc/netplan/99-networkmanager.yaml && sudo netplan apply"
+      [ -z "$ssid" ] && die "Uzycie: sudo smarthome wifi migrate-nm <SSID> <HASLO>  (podaj SWOJA siec)"
+      warn "Przygotowuje przejscie Wi-Fi na NetworkManager. Zmiana wejdzie DOPIERO PO REBOOCIE."
+      warn "NIE zrywa polaczenia teraz – ale po reboocie, jesli NM nie polaczy, Tailscale tez padnie."
+      warn "MIEJ KONSOLE HDMI POD REKA przy pierwszym rebootcie."
 
       # 1. NetworkManager (instalator celowo go nie wgrywa – robimy to tu, swiadomie).
       if ! have nmcli; then
@@ -260,37 +260,58 @@ cmd_wifi() {
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq network-manager || die "Instalacja network-manager nieudana."
       fi
 
-      # 2. Pre-utworz profil biezacej sieci, by NM od razu sie polaczyl (zachowanie lacznosci).
-      if [ -n "$pass" ]; then
-        log "Tworze profil NM dla sieci '$ssid'..."
-        nmcli connection delete "$ssid" >/dev/null 2>&1 || true
-        nmcli connection add type wifi ifname wlan0 con-name "$ssid" ssid "$ssid" 2>/dev/null || true
-        nmcli connection modify "$ssid" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$pass" connection.autoconnect yes 2>/dev/null || true
-      else
-        warn "Bez hasla – po przelaczeniu moze byc konieczne: sudo nmcli dev wifi connect \"$ssid\" password \"...\""
-      fi
+      # 2. Profil NM zapisany OFFLINE (keyfile), BEZ uruchamiania NM teraz.
+      #    Dzieki temu nie ma konfliktu o wlan0 z dzialajacym networkd – przelaczenie
+      #    nastapi czysto przy reboocie, a NM polaczy z ta siecia z autoconnect.
+      mkdir -p /etc/NetworkManager/system-connections
+      local kf="/etc/NetworkManager/system-connections/${ssid}.nmconnection"
+      local uuid; uuid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo '')"
+      {
+        echo "[connection]"
+        echo "id=${ssid}"
+        [ -n "$uuid" ] && echo "uuid=${uuid}"
+        echo "type=wifi"
+        echo "interface-name=wlan0"
+        echo "autoconnect=true"
+        echo ""
+        echo "[wifi]"
+        echo "mode=infrastructure"
+        echo "ssid=${ssid}"
+        echo ""
+        if [ -n "$pass" ]; then
+          echo "[wifi-security]"
+          echo "key-mgmt=wpa-psk"
+          echo "psk=${pass}"
+          echo ""
+        fi
+        echo "[ipv4]"
+        echo "method=auto"
+        echo ""
+        echo "[ipv6]"
+        echo "method=auto"
+      } > "$kf"
+      chmod 600 "$kf"
+      log "Zapisano profil NM: $kf"
 
-      # 3. Renderer netplan -> NetworkManager.
-      log "Ustawiam renderer netplan na NetworkManager..."
+      # 3. Renderer netplan -> NM + wylaczenie zarzadzania siecia przez cloud-init,
+      #    by po reboocie networkd NIE przejal wlan0 (to powodowalo stan 'unavailable').
       cat > /etc/netplan/99-networkmanager.yaml <<'NPEOF'
 network:
   version: 2
   renderer: NetworkManager
 NPEOF
-      chmod 0600 /etc/netplan/99-networkmanager.yaml
-      systemctl enable NetworkManager >/dev/null 2>&1 || true
-      netplan generate || true
-      log "Stosuje konfiguracje (siec na chwile zerwie, czekam ~10s)..."
-      netplan apply || true
-      sleep 10
+      chmod 600 /etc/netplan/99-networkmanager.yaml
+      mkdir -p /etc/cloud/cloud.cfg.d
+      printf 'network: {config: disabled}\n' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
 
-      # 4. Weryfikacja.
-      if nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$1=="wlan0"&&$2=="wifi"&&$3!="unmanaged"{ok=1} END{exit ok?0:1}'; then
-        ok "NetworkManager zarzadza wlan0."
-        log "Teraz wlacz AP fallback: ustaw AP_FALLBACK_ENABLE=1 w /etc/smarthome/smarthome.env i pusc 'sudo smarthome update'."
-      else
-        warn "wlan0 nadal nie jest 'managed'. Sprawdz: nmcli dev status. Powrot: rm /etc/netplan/99-networkmanager.yaml && netplan apply."
-      fi
+      # 4. Wygeneruj backendy (NIE 'apply' – zadnej zmiany na zywo, przelaczenie przy reboocie).
+      netplan generate 2>/dev/null || true
+      systemctl enable NetworkManager >/dev/null 2>&1 || true
+
+      ok "Gotowe. System dziala dalej na networkd; przejscie na NM nastapi po restarcie."
+      printf '\n    >>> ZRESTARTUJ PI:  sudo reboot  <<<\n\n'
+      log "Po reboocie NM przejmie wlan0 i polaczy z '$ssid'. Potem: AP_FALLBACK_ENABLE=1 + 'sudo smarthome update'."
+      warn "Powrot awaryjny (z konsoli, gdyby NM nie wstal): sudo rm /etc/netplan/99-networkmanager.yaml /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg && sudo netplan apply"
       ;;
     portal)
       _wifi_need_root

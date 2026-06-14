@@ -114,3 +114,13 @@ write_if_changed() {
 is_raspberry_pi() {
   grep -qi 'raspberry' /proc/cpuinfo /sys/firmware/devicetree/base/model 2>/dev/null
 }
+
+# Czy NetworkManager REALNIE zarzadza wlan0 (stan uzywalny: nie 'unmanaged'/'unavailable').
+# Sluzy do bramkowania uslug Wi-Fi (AP fallback, sterowanie z dashboardu) – na systemie
+# z networkd zwraca falsz, wiec setup nie wlacza uslug, ktore i tak by nie dzialaly.
+nm_manages_wlan0() {
+  have nmcli || return 1
+  systemctl is-active --quiet NetworkManager 2>/dev/null || return 1
+  nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null \
+    | awk -F: '$1=="wlan0" && $2=="wifi" && $3!="unmanaged" && $3!="unavailable" {f=1} END{exit f?0:1}'
+}

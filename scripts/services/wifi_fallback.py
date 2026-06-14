@@ -47,15 +47,17 @@ def nmcli(*args, check=False):
 
 
 def nm_manages_wifi():
-    """True tylko gdy NetworkManager zarzadza jakims interfejsem Wi-Fi.
-    Na Ubuntu Server (networkd) wlan0 bywa 'unmanaged' – wtedy NIE ruszamy sieci."""
+    """True tylko gdy NetworkManager realnie zarzadza interfejsem Wi-Fi w UZYWALNYM
+    stanie. 'unmanaged' (networkd trzyma wlan0) oraz 'unavailable' (radio nie wstalo
+    / konflikt z networkd) traktujemy jako NIE-zarzadza – wtedy usluga jest bezczynna
+    zamiast bez sensu probowac podnosic AP w petli."""
     try:
         out = nmcli("-t", "-f", "DEVICE,TYPE,STATE", "device")
     except FileNotFoundError:
         return False
     for line in out.stdout.strip().splitlines():
         parts = line.split(":")
-        if len(parts) >= 3 and parts[1] == "wifi" and parts[2] != "unmanaged":
+        if len(parts) >= 3 and parts[1] == "wifi" and parts[2] not in ("unmanaged", "unavailable"):
             return True
     return False
 
