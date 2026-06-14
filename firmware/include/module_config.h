@@ -16,7 +16,7 @@
 // Ten plik centralizuje wszystkie wartości zależne od modułu.
 
 // --- Wersja firmware (raportowana w topicu info, przydatna przy OTA) ---
-#define FIRMWARE_VERSION  "2.1.0"
+#define FIRMWARE_VERSION  "2.2.0"
 
 // --- Wspólna infrastruktura sieciowa ---
 #define RPI_HOSTNAME      "rpi-smarthome"   // host mDNS brokera (Raspberry Pi)

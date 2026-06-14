@@ -361,8 +361,39 @@ NPEOF
       esac
       _wifi_write_status
       ;;
+    switch-all)
+      # Przepina CALA makiete na nowa siec: najpierw rozsyla set_wifi do wszystkich
+      # wezlow ESP (musza byc ONLINE), potem przelacza sam RPi. Wymaga firmware z
+      # obsluga set_wifi i Wi-Fi pod NetworkManagerem.
+      _wifi_need_root
+      local nssid="${1:-}" npass="${2:-}"
+      [ -z "$nssid" ] && die "Uzycie: sudo smarthome wifi switch-all <SSID> <HASLO>"
+      case "$nssid$npass" in
+        *'"'*|*'\'*) die "SSID/haslo nie moga zawierac znakow \" ani \\ (psuja JSON komendy).";;
+      esac
+      warn "Przepinam CALA makiete na siec '$nssid' (ESP-ki + RPi)."
+      warn "Rob to PRZEZ TAILSCALE – przelaczenie RPi zerwie biezaca siec lokalna."
+      local payload kinds kk
+      payload="$(printf '{"cmd":"set_wifi","ssid":"%s","pass":"%s"}' "$nssid" "$npass")"
+      IFS=',' read -ra kinds <<< "${EXPECTED_KINDS:-security,access,environment}"
+      log "Rozsylam set_wifi do wezlow ESP (musza byc teraz online)..."
+      for kk in "${kinds[@]}"; do
+        kk="$(printf '%s' "$kk" | xargs)"
+        [ -z "$kk" ] && continue
+        log "  -> home/$kk/cmd"
+        mq_pub -t "home/$kk/cmd" -m "$payload"
+      done
+      log "Czekam 6 s, az ESP-ki odbiora komende i zaczna restart na nowa siec..."
+      sleep 6
+      log "Przelaczam RPi na '$nssid'..."
+      if nmcli device wifi connect "$nssid" password "$npass"; then
+        ok "RPi przelaczony. Po ~1-2 min: 'smarthome nodes' (ESP-ki powinny wrocic na nowej sieci)."
+      else
+        warn "Przelaczenie RPi nieudane (sprawdz 'smarthome wifi status'). ESP-ki juz dostaly nowe dane."
+      fi
+      ;;
     *)
-      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]|scan|migrate-nm <ssid> <haslo>>"
+      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]|scan|switch-all <ssid> <haslo>|migrate-nm <ssid> <haslo>>"
       ;;
   esac
 }

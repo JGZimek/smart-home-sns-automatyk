@@ -35,6 +35,22 @@ static bool s_broker_watchdog_started = false;
 // się z brokerem, więc chwilowa awaria brokera na działającej makiecie nie wymusza parowania.
 #define BROKER_PROV_TIMEOUT_S 180
 
+// Zapisuje nowe dane Wi-Fi do NVS (storage = flash). Wywoływane przez komendę
+// set_wifi, gdy chcemy zdalnie przepiąć węzeł na inną sieć. Faktyczne przełączenie
+// realizuje restart (device_core), dzięki czemu połączenie z nową siecią jest czyste.
+void wifi_set_credentials(const char *ssid, const char *pass)
+{
+    wifi_config_t cfg = {};
+    snprintf((char *)cfg.sta.ssid, sizeof(cfg.sta.ssid), "%s", ssid);
+    snprintf((char *)cfg.sta.password, sizeof(cfg.sta.password), "%s", pass);
+
+    ESP_LOGW(TAG_PROV, "Zapisuje nowe dane Wi-Fi (SSID: %s) do NVS.", ssid);
+    esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    if (esp_wifi_set_config(WIFI_IF_STA, &cfg) != ESP_OK) {
+        ESP_LOGE(TAG_PROV, "Nie udalo sie zapisac konfiguracji Wi-Fi.");
+    }
+}
+
 void ota_update_task(void *pvParameter)
 {
     char *ota_url = (char *)pvParameter;

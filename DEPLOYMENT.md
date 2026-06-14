@@ -101,6 +101,15 @@ tailscale serve status              # pokaze URL
 
 Makietę przewozisz w inne miejsce / zmieniasz router. Trzeba ustawić **i Pi, i ESP-ki** na nową sieć.
 
+### 3.0. Najprościej: całość jednym poleceniem (`switch-all`)
+Gdy ESP-ki są **online** i firmware obsługuje `set_wifi`, przepnij **wszystko naraz** (uruchom przez Tailscale):
+```bash
+sudo smarthome wifi switch-all "<NOWY_SSID>" "<HASLO>"
+```
+Rozsyła nowe dane do wszystkich węzłów ESP, czeka aż się zrestartują na nową sieć, po czym przełącza sam RPi.
+Po ~1–2 min `smarthome nodes` powinno pokazać 3/3. Węzeł offline w chwili wysyłki trzeba dostroić osobno
+(BLE / §3.2). Ręczne kroki poniżej zostają jako rozbicie tego procesu / awaryjność.
+
 ### 3.1. Raspberry Pi → nowa sieć
 
 **Z dashboardu** (`http://rpi-smarthome.local:8080` lub przez Tailscale): karta **„Sieć Wi-Fi"** — skan,
