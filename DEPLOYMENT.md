@@ -122,11 +122,24 @@ sudo smarthome wifi portal off              # anuluj (powrot do zapisanej sieci)
 
 Portal na żądanie działa nawet, gdy Pi jest jeszcze połączone ze starą siecią — w odróżnieniu od
 automatycznego AP fallback (usługa `smarthome-wifi-fallback`), który podnosi się dopiero po **utracie**
-łączności. Oba wymagają, by Wi-Fi było zarządzane przez NetworkManager (etap migracji w [scripts/README.md](scripts/README.md)).
+łączności.
 
-- Alternatywnie ręcznie: `sudo nmcli dev wifi connect "<SSID>" password "<HASLO>"`, albo (Ubuntu pod networkd)
-  edycja `/etc/netplan/50-cloud-init.yaml` + `sudo netplan apply`.
+**Wymóg:** `connect`/`portal`/AP fallback działają tylko gdy Wi-Fi jest pod **NetworkManagerem**
+(Ubuntu Server używa networkd). Włącz to **raz**, jedną komendą (uruchom przez Tailscale `100.x` lub konsolę HDMI):
+
+```bash
+sudo smarthome wifi migrate-nm "<TWOJ_SSID>" "<HASLO>"   # wlan0 na chwile zerwie
+# w /etc/smarthome/smarthome.env:  AP_FALLBACK_ENABLE=1
+sudo smarthome update
+```
+
+- Alternatywnie ręcznie: `sudo nmcli dev wifi connect "<SSID>" password "<HASLO>"`.
 - Tailscale i konto brokera nie wymagają zmian. mDNS (`rpi-smarthome.local`) działa dalej po połączeniu.
+
+**Straciłeś dostęp do Pi?** Kolejność ratunku:
+1. Pi **bez żadnej sieci** → po ~90 s само stawia AP `SmartHome-Config` (jeśli AP fallback włączony) → telefon → `http://10.42.0.1`.
+2. Pi **ma internet** w innej sieci → wejdź przez Tailscale `ssh smarthome@100.x` → `sudo smarthome wifi connect ...`.
+3. Ostateczność → konsola HDMI/klawiatura lub edycja sieci na karcie SD.
 
 ### 3.2. ESP-ki → nowa sieć
 Poświadczenia Wi-Fi w ESP są w pamięci NVS. Aby je zmienić:

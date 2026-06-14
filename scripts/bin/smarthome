@@ -193,8 +193,11 @@ FORCE_PORTAL_FILE="$STATE_DIR/force_portal"
 _wifi_need_root() { [ "$(id -u)" -eq 0 ] || die "Ta operacja zmienia siec i wymaga root: poprzedz poleceniem 'sudo'."; }
 
 cmd_wifi() {
-  have nmcli || die "Brak nmcli (NetworkManager nie zarzadza siecia). Patrz setup.d/20-hostname-mdns.sh."
   local action="${1:-status}"; shift || true
+  # migrate-nm sam instaluje NetworkManagera (bootstrap), wiec NIE wymaga nmcli z gory.
+  if [ "$action" != "migrate-nm" ]; then
+    have nmcli || die "Brak nmcli. Najpierw zmigruj Wi-Fi: sudo smarthome wifi migrate-nm \"<SSID>\" \"<HASLO>\""
+  fi
   case "$action" in
     status|"")
       printf '%s== Wi-Fi serwera ==%s\n' "$C_BOLD" "$C_RESET"
@@ -228,6 +231,55 @@ cmd_wifi() {
       _wifi_need_root
       nmcli connection delete "$ssid" && ok "Usunieto zapisana siec '$ssid'."
       ;;
+    migrate-nm)
+      _wifi_need_root
+      local ssid="${1:-}" pass="${2:-}"
+      [ -z "$ssid" ] && ssid="$(iwgetid -r 2>/dev/null || true)"
+      [ -z "$ssid" ] && die "Uzycie: sudo smarthome wifi migrate-nm <SSID> <HASLO>  (podaj SWOJA siec, by nie stracic polaczenia)"
+      warn "Migracja Wi-Fi do NetworkManagera – wlan0 na chwile zerwie polaczenie."
+      warn "URUCHOM PRZEZ TAILSCALE (100.x) lub Z KONSOLI HDMI, inaczej ryzykujesz lockout."
+      warn "Awaryjny powrot (tylko z konsoli): sudo rm /etc/netplan/99-networkmanager.yaml && sudo netplan apply"
+
+      # 1. NetworkManager (instalator celowo go nie wgrywa – robimy to tu, swiadomie).
+      if ! have nmcli; then
+        log "Instaluje network-manager..."
+        wait_for_apt
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq network-manager || die "Instalacja network-manager nieudana."
+      fi
+
+      # 2. Pre-utworz profil biezacej sieci, by NM od razu sie polaczyl (zachowanie lacznosci).
+      if [ -n "$pass" ]; then
+        log "Tworze profil NM dla sieci '$ssid'..."
+        nmcli connection delete "$ssid" >/dev/null 2>&1 || true
+        nmcli connection add type wifi ifname wlan0 con-name "$ssid" ssid "$ssid" 2>/dev/null || true
+        nmcli connection modify "$ssid" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$pass" connection.autoconnect yes 2>/dev/null || true
+      else
+        warn "Bez hasla – po przelaczeniu moze byc konieczne: sudo nmcli dev wifi connect \"$ssid\" password \"...\""
+      fi
+
+      # 3. Renderer netplan -> NetworkManager.
+      log "Ustawiam renderer netplan na NetworkManager..."
+      cat > /etc/netplan/99-networkmanager.yaml <<'NPEOF'
+network:
+  version: 2
+  renderer: NetworkManager
+NPEOF
+      chmod 0600 /etc/netplan/99-networkmanager.yaml
+      systemctl enable NetworkManager >/dev/null 2>&1 || true
+      netplan generate || true
+      log "Stosuje konfiguracje (siec na chwile zerwie, czekam ~10s)..."
+      netplan apply || true
+      sleep 10
+
+      # 4. Weryfikacja.
+      if nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$1=="wlan0"&&$2=="wifi"&&$3!="unmanaged"{ok=1} END{exit ok?0:1}'; then
+        ok "NetworkManager zarzadza wlan0."
+        log "Teraz wlacz AP fallback: ustaw AP_FALLBACK_ENABLE=1 w /etc/smarthome/smarthome.env i pusc 'sudo smarthome update'."
+      else
+        warn "wlan0 nadal nie jest 'managed'. Sprawdz: nmcli dev status. Powrot: rm /etc/netplan/99-networkmanager.yaml && netplan apply."
+      fi
+      ;;
     portal)
       _wifi_need_root
       if [ "${1:-}" = "off" ]; then
@@ -244,7 +296,7 @@ cmd_wifi() {
       fi
       ;;
     *)
-      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]>"
+      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]|migrate-nm <ssid> <haslo>>"
       ;;
   esac
 }

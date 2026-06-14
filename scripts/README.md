@@ -50,6 +50,7 @@ smarthome cmd <kind> <komenda>  # reboot | reset_wifi | identify | diag | ping  
 smarthome ota <kind> <plik|url>   # zdalny OTA: plik .bin hostowany na Pi lub gotowy URL -> home/<kind>/update
 smarthome set <topic> <payload>   # surowa publikacja (np. home/access/door/set OPEN)
 smarthome watch [topic]       # podgląd ruchu MQTT (domyślnie home/#)
+smarthome wifi <...>          # sieć Wi-Fi serwera: status|list|connect|forget|portal|migrate-nm (offline)
 smarthome logs <usługa>       # monitor | wifi | lcd | health | broker
 smarthome broker <up|down|restart|logs>
 smarthome update              # git pull + ponowny setup
@@ -82,7 +83,7 @@ a ESP pobiera firmware lokalnie z Pi. Pełna procedura (w tym GitHub Actions prz
 
 | Mechanizm | Co robi |
 | :-------- | :------ |
-| **Awaryjny AP Wi-Fi** (`smarthome-wifi-fallback`) | **Opt-in** (`AP_FALLBACK_ENABLE=1`, wymaga Wi-Fi pod NetworkManager – patrz niżej). Gdy Pi straci połączenie z siecią na dłużej niż karencja, podnosi własny AP `SmartHome-Config` ze stroną do wpisania nowej sieci. Po sukcesie kasuje AP. |
+| **Awaryjny AP Wi-Fi** (`smarthome-wifi-fallback`) | **Opt-in** (`AP_FALLBACK_ENABLE=1` + Wi-Fi pod NetworkManager: `sudo smarthome wifi migrate-nm` – patrz niżej). Gdy Pi straci połączenie z siecią na dłużej niż karencja, podnosi własny AP `SmartHome-Config` ze stroną do wpisania nowej sieci. Po sukcesie kasuje AP. Portal na żądanie: `sudo smarthome wifi portal`. |
 | **Watchdog brokera** (`smarthome-health.timer`) | Co 2 min sprawdza port 1883; po 2 nieudanych próbach restartuje kontener brokera. |
 | **Sprzętowy watchdog** (systemd) | Reboot Pi przy zawisie systemu. |
 | **zram swap** | Kompresowany swap w RAM – zapas pamięci na Zero 2W bez zużywania karty SD. |
@@ -95,20 +96,24 @@ Broker, mDNS, OTA, Tailscale, dashboard i watchdogi **działają niezależnie od
 **nie** instaluje NetworkManagera (instalacja NM po Wi-Fi przejęłaby `wlan0` i zerwała połączenie).
 Power-save wyłączamy renderer-agnostycznie przez `iw` (usługa `wifi-powersave-off`).
 
-Awaryjny AP wymaga jednak NM. Aby go włączyć, **zmigruj Wi-Fi do NetworkManagera** (najlepiej z konsoli
-Pi lub przez Tailscale, bo na chwilę zerwie sieć):
+Awaryjny AP wymaga jednak NM. Migracja jest zautomatyzowana **jedną komendą** (pre-tworzy profil NM
+z Twoimi danymi, żeby połączenie nie padło, i przełącza renderer):
 
 ```bash
-sudo tee /etc/netplan/99-networkmanager.yaml >/dev/null <<'EOF'
-network:
-  version: 2
-  renderer: NetworkManager
-EOF
-sudo netplan apply
-sudo nmcli dev wifi connect "<TWOJ_SSID>" password "<HASLO>"
-# następnie w /etc/smarthome/smarthome.env ustaw AP_FALLBACK_ENABLE=1 i:
+# URUCHOM PRZEZ TAILSCALE (100.x) lub z konsoli HDMI – wlan0 na chwilę zerwie!
+sudo smarthome wifi migrate-nm "<TWOJ_SSID>" "<HASLO>"
+
+# następnie włącz fallback w /etc/smarthome/smarthome.env:  AP_FALLBACK_ENABLE=1
 sudo smarthome update
+smarthome status        # powinno pokazać smarthome-wifi-fallback active
 ```
+
+`migrate-nm` instaluje NetworkManagera, tworzy profil bieżącej sieci, ustawia `renderer: NetworkManager`
+w netplan i weryfikuje, czy `wlan0` jest „managed". Awaryjny powrót (z konsoli):
+`sudo rm /etc/netplan/99-networkmanager.yaml && sudo netplan apply`.
+
+Po migracji działają też: `sudo smarthome wifi connect "SSID" "HASLO"` (przepięcie sieci) oraz
+`sudo smarthome wifi portal` (wymuszony AP konfiguracyjny na żądanie).
 
 ## Struktura katalogu
 
