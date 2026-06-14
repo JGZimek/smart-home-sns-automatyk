@@ -53,6 +53,16 @@ ok "Usluga monitora wezlow aktywna."
 systemctl enable --now smarthome-update.path
 ok "Wyzwalacz samoaktualizacji aktywny (przycisk 'Aktualizuj' w dashboardzie)."
 
+# Sterowanie Wi-Fi z dashboardu: .path wykonuje zadania (connect/scan/portal) jako root.
+# Ma sens tylko gdy Wi-Fi jest pod NetworkManagerem (po 'smarthome wifi migrate-nm').
+if have nmcli; then
+  systemctl enable --now smarthome-wifi-apply.path
+  ok "Sterowanie Wi-Fi z dashboardu aktywne."
+else
+  systemctl disable --now smarthome-wifi-apply.path >/dev/null 2>&1 || true
+  log "Sterowanie Wi-Fi z dashboardu pominiete (brak NetworkManager – zob. 'smarthome wifi migrate-nm')."
+fi
+
 # Health timer (watchdog brokera + publikacja zdrowia Pi)
 systemctl enable --now smarthome-health.timer
 ok "Timer health (watchdog brokera) aktywny."

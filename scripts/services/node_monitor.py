@@ -19,6 +19,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -43,6 +44,13 @@ STATE_FILE = os.environ.get("STATE_FILE", "/var/lib/smarthome/nodes.json")
 # Plik-wyzwalacz samoaktualizacji (tworzy go web jako user 'smarthome', usuwa root).
 UPDATE_REQUEST_FILE = os.environ.get("UPDATE_REQUEST_FILE", "/var/lib/smarthome/update_request")
 UPDATE_STATUS_FILE = os.environ.get("UPDATE_STATUS_FILE", "/var/lib/smarthome/update_status.json")
+# Sterowanie Wi-Fi z dashboardu (karta "Sieć Wi-Fi"). Web pisze plik-żądanie,
+# rootowa usługa smarthome-wifi-apply wykonuje przez nmcli. Wyłącz (0), jeśli
+# dashboard jest dostępny szerzej niż zaufany LAN/Tailscale.
+WEB_WIFI_ENABLE = os.environ.get("WEB_WIFI_ENABLE", "1") == "1"
+WIFI_REQUEST_FILE = os.environ.get("WIFI_REQUEST_FILE", "/var/lib/smarthome/wifi_request")
+WIFI_CURRENT_FILE = os.environ.get("WIFI_CURRENT_FILE", "/var/lib/smarthome/wifi_current.txt")
+WIFI_NETWORKS_FILE = os.environ.get("WIFI_NETWORKS_FILE", "/var/lib/smarthome/wifi_networks.txt")
 # Katalog z plikami firmware serwowanymi po HTTP dla OTA (ESP pobiera stad firmware.bin).
 FIRMWARE_DIR = os.environ.get("FIRMWARE_DIR", "/var/lib/smarthome/firmware")
 SERVER_KIND = "system"  # Pi publikuje sie jako home/system/server/*
@@ -70,6 +78,19 @@ def read_json(path):
             return json.load(f)
     except Exception:
         return {}
+
+
+def read_lines(path):
+    try:
+        with open(path) as f:
+            return [ln.strip() for ln in f if ln.strip()]
+    except Exception:
+        return []
+
+
+def html_escape(s):
+    return (s.replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
 
 
 # ---------------- Zbieranie metryk Pi ----------------
@@ -291,6 +312,20 @@ function doUpdate(){
   alert(d.triggered?'Aktualizacja uruchomiona. Odswiez strone za okolo minute.':('Niedostepne: '+(d.error||'?')));
  }).catch(function(e){alert('Blad: '+e);});
 }
+function wifiPost(b){return fetch('/wifi',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b});}
+function wifiConnect(e){e.preventDefault();
+ var s=document.getElementById('wssid').value,p=document.getElementById('wpass').value;
+ if(!s){alert('Podaj SSID');return false;}
+ if(!confirm('Przelaczyc serwer na siec "'+s+'"? Jesli ogladasz przez ta siec, stracisz dostep — uzyj Tailscale.'))return false;
+ wifiPost('action=connect&ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p))
+  .then(function(){alert('Zlecono. Serwer przelaczy sie za chwile; odswiez za ~30s.');})
+  .catch(function(e){alert('Blad: '+e);});
+ return false;}
+function wifiAction(a){
+ if(a.indexOf('portal')===0 && !confirm('Operacja AP/portal moze chwilowo zmienic siec. Kontynuowac?'))return;
+ wifiPost('action='+a).then(function(){alert('Zlecono: '+a+'. Odswiez za chwile.');})
+  .catch(function(e){alert('Blad: '+e);});
+}
 </script>
 </body></html>"""
 
@@ -331,6 +366,33 @@ def render_dashboard():
                       'padding:9px;background:#2f6feb;color:#fff;border:0;border-radius:6px;'
                       'cursor:pointer;font-size:13px">Sprawdz i zainstaluj aktualizacje</button>')
     cards.append(render_card("SERWER (Pi)", "online", srv_rows, "server", update_btn))
+    # Karta sterowania Wi-Fi serwera (skan / połącz / portal) – opcjonalna.
+    if WEB_WIFI_ENABLE:
+        cur = read_lines(WIFI_CURRENT_FILE)
+        nets = read_lines(WIFI_NETWORKS_FILE)
+        opts = "".join('<option value="%s">' % html_escape(n) for n in nets[:40])
+        wifi_rows = [
+            ("aktywna sieć", cur[0] if cur else "-"),
+            ("w zasięgu", ("%d sieci" % len(nets)) if nets else "- (kliknij Skanuj)"),
+        ]
+        inp = ('style="width:100%;padding:8px;margin:4px 0;border-radius:6px;'
+               'border:1px solid #2a3441;background:#0f1620;color:#e6edf3;box-sizing:border-box"')
+        sbtn = 'style="flex:1;padding:7px;background:#30363d;color:#e6edf3;border:0;border-radius:6px;cursor:pointer;font-size:12px"'
+        wifi_form = (
+            '<form onsubmit="return wifiConnect(event)" style="margin-top:8px">'
+            '<input id="wssid" list="wnets" placeholder="SSID" %s>'
+            '<datalist id="wnets">%s</datalist>'
+            '<input id="wpass" type="password" placeholder="haslo (puste = otwarta)" %s>'
+            '<button style="width:100%%;padding:8px;background:#238636;color:#fff;border:0;border-radius:6px;cursor:pointer">Polacz</button>'
+            '</form>'
+            '<div style="display:flex;gap:6px;margin-top:6px">'
+            '<button onclick="wifiAction(\'scan\')" %s>Skanuj</button>'
+            '<button onclick="wifiAction(\'portal\')" %s>Portal</button>'
+            '<button onclick="wifiAction(\'portal-off\')" %s>Portal off</button>'
+            '</div>'
+            '<div style="color:#6b7681;font-size:11px;margin-top:6px">Przełączenie sieci zerwie dostęp przez tę sieć — używaj przez Tailscale.</div>'
+        ) % (inp, opts, inp, sbtn, sbtn, sbtn)
+        cards.append(render_card("SIEĆ WI-FI", "online", wifi_rows, "server", wifi_form))
     # Karty wezlow ESP
     for kind in sorted(snap["nodes"].keys()):
         n = snap["nodes"][kind]
@@ -368,6 +430,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/update-status"):
             self._send(200, json.dumps(read_json(UPDATE_STATUS_FILE), ensure_ascii=False),
                        "application/json; charset=utf-8")
+        elif self.path.startswith("/api/wifi"):
+            cur = read_lines(WIFI_CURRENT_FILE)
+            body = {"current": cur[0] if cur else None, "networks": read_lines(WIFI_NETWORKS_FILE)}
+            self._send(200, json.dumps(body, ensure_ascii=False), "application/json; charset=utf-8")
         elif self.path.startswith("/healthz"):
             self._send(200, "ok\n", "text/plain")
         elif self.path.startswith("/firmware/"):
@@ -378,15 +444,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, "not found\n", "text/plain")
 
     def do_POST(self):
-        # Pochlon ewentualne cialo zadania (zeby keep-alive nie zglupial).
+        # Wczytaj cialo zadania (form-urlencoded) – potrzebne dla /wifi, a dla /update
+        # po prostu je konsumujemy.
+        raw = ""
         try:
             length = int(self.headers.get("Content-Length", 0) or 0)
             if length:
-                self.rfile.read(length)
+                raw = self.rfile.read(length).decode("utf-8", "replace")
         except (ValueError, TypeError):
             pass
+        path = self.path.rstrip("/")
 
-        if self.path.rstrip("/") == "/update":
+        if path == "/update":
             if not WEB_UPDATE_ENABLE:
                 self._send(403, json.dumps({"triggered": False, "error": "wylaczone (WEB_UPDATE_ENABLE=0)"}),
                            "application/json; charset=utf-8")
@@ -401,6 +470,36 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, json.dumps({"triggered": True}), "application/json; charset=utf-8")
             except Exception as e:
                 self._send(500, json.dumps({"triggered": False, "error": str(e)}),
+                           "application/json; charset=utf-8")
+        elif path == "/wifi":
+            if not WEB_WIFI_ENABLE:
+                self._send(403, json.dumps({"queued": False, "error": "wylaczone (WEB_WIFI_ENABLE=0)"}),
+                           "application/json; charset=utf-8")
+                return
+            try:
+                form = urllib.parse.parse_qs(raw)
+                action = (form.get("action", [""])[0]).strip()
+                ssid = form.get("ssid", [""])[0]
+                pw = form.get("pass", [""])[0]
+                if action not in ("connect", "forget", "portal", "portal-off", "scan"):
+                    self._send(400, json.dumps({"queued": False, "error": "zla akcja"}),
+                               "application/json; charset=utf-8")
+                    return
+                # Format klucz=wartosc; usun znaki nowej linii (integralnosc pliku-zadania).
+                def clean(v):
+                    return v.replace("\n", " ").replace("\r", " ")
+                os.makedirs(os.path.dirname(WIFI_REQUEST_FILE), exist_ok=True)
+                lines = ["action=%s" % clean(action)]
+                if ssid:
+                    lines.append("ssid=%s" % clean(ssid))
+                if pw:
+                    lines.append("pass=%s" % clean(pw))
+                with open(WIFI_REQUEST_FILE, "w") as f:
+                    f.write("\n".join(lines) + "\n")
+                log("Zlecono Wi-Fi z dashboardu: action=%s ssid=%s" % (action, ssid))
+                self._send(200, json.dumps({"queued": True}), "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(500, json.dumps({"queued": False, "error": str(e)}),
                            "application/json; charset=utf-8")
         else:
             self._send(404, "not found\n", "text/plain")

@@ -103,7 +103,11 @@ Makietę przewozisz w inne miejsce / zmieniasz router. Trzeba ustawić **i Pi, i
 
 ### 3.1. Raspberry Pi → nowa sieć
 
-Najprościej poleceniem **`smarthome wifi`** (działa lokalnie, **bez internetu** — z konsoli/HDMI lub SSH po LAN/Tailscale):
+**Z dashboardu** (`http://rpi-smarthome.local:8080` lub przez Tailscale): karta **„Sieć Wi-Fi"** — skan,
+wybór sieci, hasło, „Połącz", oraz przyciski „Portal"/„Skanuj". Wymaga NetworkManagera (`migrate-nm`, niżej).
+Przełączaj **przez Tailscale**, bo zmiana zrywa dostęp przez bieżącą sieć.
+
+**Z CLI** — poleceniem **`smarthome wifi`** (działa lokalnie, **bez internetu** — z konsoli/HDMI lub SSH po LAN/Tailscale):
 
 ```bash
 smarthome wifi                              # status: aktywna siec, IP, zapisane sieci

@@ -189,8 +189,20 @@ cmd_broker() {
 # smarthome-wifi-fallback przez plik-wyzwalacz $STATE_DIR/force_portal).
 # ==========================================================
 FORCE_PORTAL_FILE="$STATE_DIR/force_portal"
+# Plik-zadanie z dashboardu (web pisze, rootowa usluga smarthome-wifi-apply wykonuje).
+WIFI_REQUEST_FILE="$STATE_DIR/wifi_request"
 
 _wifi_need_root() { [ "$(id -u)" -eq 0 ] || die "Ta operacja zmienia siec i wymaga root: poprzedz poleceniem 'sudo'."; }
+
+# Zapisuje biezacy stan Wi-Fi do plikow tekstowych czytanych przez dashboard
+# (bez JSON-a w bashu): aktywna siec + lista sieci w zasiegu.
+_wifi_write_status() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  { nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null || true; } \
+    | awk -F: '$2=="wlan0"{print $1; exit}' > "$STATE_DIR/wifi_current.txt" 2>/dev/null || true
+  { nmcli -t -f SSID device wifi list 2>/dev/null || true; } \
+    | awk 'NF && !seen[$0]++' > "$STATE_DIR/wifi_networks.txt" 2>/dev/null || true
+}
 
 cmd_wifi() {
   local action="${1:-status}"; shift || true
@@ -295,8 +307,41 @@ NPEOF
         log "Polacz telefon z tym AP i otworz http://10.42.0.1  (wylacz: sudo smarthome wifi portal off)"
       fi
       ;;
+    scan)
+      _wifi_need_root
+      nmcli device wifi rescan 2>/dev/null || true
+      sleep 2
+      _wifi_write_status
+      ok "Skan zapisany ($STATE_DIR/wifi_networks.txt)."
+      ;;
+    apply-request)
+      # Wykonawca zadan z dashboardu. Czyta $WIFI_REQUEST_FILE (format klucz=wartosc),
+      # wykonuje akcje przez nmcli i odswieza pliki stanu. Wolane przez root (usluga).
+      _wifi_need_root
+      if [ ! -f "$WIFI_REQUEST_FILE" ]; then _wifi_write_status; return 0; fi
+      local a="" s="" p="" k v
+      while IFS='=' read -r k v; do
+        case "$k" in action) a="$v" ;; ssid) s="$v" ;; pass) p="$v" ;; esac
+      done < "$WIFI_REQUEST_FILE"
+      rm -f "$WIFI_REQUEST_FILE" 2>/dev/null || true
+      log "Zadanie Wi-Fi z dashboardu: action=$a ssid=$s"
+      case "$a" in
+        connect)
+          if [ -n "$s" ] && [ -n "$p" ]; then nmcli device wifi connect "$s" password "$p" || true
+          elif [ -n "$s" ]; then nmcli device wifi connect "$s" || true; fi
+          rm -f "$FORCE_PORTAL_FILE" 2>/dev/null || true ;;
+        forget)      [ -n "$s" ] && { nmcli connection delete "$s" || true; } ;;
+        portal)      : > "$FORCE_PORTAL_FILE" ;;
+        portal-off)  rm -f "$FORCE_PORTAL_FILE" 2>/dev/null || true
+                     nmcli connection down "${AP_SSID:-SmartHome-Config}" 2>/dev/null || true
+                     nmcli connection delete "${AP_SSID:-SmartHome-Config}" 2>/dev/null || true ;;
+        scan)        nmcli device wifi rescan 2>/dev/null || true; sleep 2 ;;
+        *)           warn "Nieznana akcja Wi-Fi: $a" ;;
+      esac
+      _wifi_write_status
+      ;;
     *)
-      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]|migrate-nm <ssid> <haslo>>"
+      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]|scan|migrate-nm <ssid> <haslo>>"
       ;;
   esac
 }

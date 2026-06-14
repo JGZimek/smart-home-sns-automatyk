@@ -68,6 +68,11 @@ Usługa **`smarthome-node-monitor`** subskrybuje `home/+/{info,availability,diag
   Dostępny też przez Tailscale MagicDNS (np. z telefonu, bez bycia w tej samej sieci LAN).
 - **`http://rpi-smarthome.local:8080/api/nodes`** – ten sam stan w JSON (dla backendu/skryptów).
 
+Karta **serwera** ma przycisk **„Sprawdz i zainstaluj aktualizacje"** (`WEB_UPDATE_ENABLE`), a karta
+**„Sieć Wi-Fi"** (`WEB_WIFI_ENABLE`, wymaga NetworkManagera) pozwala **skanować, przełączać sieć i wymuszać
+portal** wprost z dashboardu. Obie operacje wykonuje root przez usługi `smarthome-update` / `smarthome-wifi-apply`
+(web tylko pisze plik-żądanie). **Przełączaj sieć przez Tailscale** – zmiana zrywa dostęp przez bieżącą sieć.
+
 Monitor publikuje też zdrowie samego Pi jako węzeł `home/system/server/*` – backend widzi serwer tak samo
 jak płytki ESP.
 
@@ -83,7 +88,7 @@ a ESP pobiera firmware lokalnie z Pi. Pełna procedura (w tym GitHub Actions prz
 
 | Mechanizm | Co robi |
 | :-------- | :------ |
-| **Awaryjny AP Wi-Fi** (`smarthome-wifi-fallback`) | **Opt-in** (`AP_FALLBACK_ENABLE=1` + Wi-Fi pod NetworkManager: `sudo smarthome wifi migrate-nm` – patrz niżej). Gdy Pi straci połączenie z siecią na dłużej niż karencja, podnosi własny AP `SmartHome-Config` ze stroną do wpisania nowej sieci. Po sukcesie kasuje AP. Portal na żądanie: `sudo smarthome wifi portal`. |
+| **Awaryjny AP Wi-Fi** (`smarthome-wifi-fallback`) | **Opt-in** (`AP_FALLBACK_ENABLE=1` + Wi-Fi pod NetworkManager: `sudo smarthome wifi migrate-nm` – patrz niżej). Gdy Pi straci połączenie z siecią na dłużej niż karencja, podnosi własny AP `SmartHome-Config` ze stroną do **wyboru sieci ze skanu** lub wpisania ręcznie (`http://10.42.0.1`). Po sukcesie kasuje AP. Portal na żądanie: `sudo smarthome wifi portal` lub przycisk w dashboardzie. |
 | **Watchdog brokera** (`smarthome-health.timer`) | Co 2 min sprawdza port 1883; po 2 nieudanych próbach restartuje kontener brokera. |
 | **Sprzętowy watchdog** (systemd) | Reboot Pi przy zawisie systemu. |
 | **zram swap** | Kompresowany swap w RAM – zapas pamięci na Zero 2W bez zużywania karty SD. |

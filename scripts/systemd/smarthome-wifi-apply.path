@@ -1,0 +1,9 @@
+[Unit]
+Description=Smart Home – wyzwalacz zadan Wi-Fi z dashboardu (plik wifi_request)
+
+[Path]
+PathExists=/var/lib/smarthome/wifi_request
+Unit=smarthome-wifi-apply.service
+
+[Install]
+WantedBy=multi-user.target

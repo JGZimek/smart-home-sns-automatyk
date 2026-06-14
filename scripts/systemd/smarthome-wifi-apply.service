@@ -1,0 +1,9 @@
+[Unit]
+Description=Smart Home – wykonawca zadan Wi-Fi z dashboardu (nmcli jako root)
+# Wyzwalana plikiem /var/lib/smarthome/wifi_request (tworzy go dashboard jako user
+# 'smarthome') przez smarthome-wifi-apply.path. Web nie ma roota – tylko prosi.
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/smarthome wifi apply-request
