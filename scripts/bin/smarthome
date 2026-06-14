@@ -262,7 +262,15 @@ cmd_update() {
     > "$status_file" 2>/dev/null || true
 
   log "Sprawdzam i pobieram zmiany ($REPO_DIR)..."
-  git -C "$REPO_DIR" pull --ff-only || ok=0
+  # Model wezla wdrozeniowego: working tree = lustro origin. Twarde wyrownanie
+  # (fetch + reset --hard) jest odporne na lokalny drift plikow na Pi (inaczej
+  # 'pull' wywala sie na 'local changes would be overwritten'). Konfiguracja
+  # uzytkownika nie jest w repo (siedzi w /etc/smarthome), wiec nic nie tracimy.
+  local branch
+  branch="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo develop)"
+  if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then branch="${REPO_BRANCH:-develop}"; fi
+  git -C "$REPO_DIR" fetch --prune origin || ok=0
+  git -C "$REPO_DIR" reset --hard "origin/$branch" || ok=0
   after="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
   [ "$before" != "$after" ] && changed=1
   [ "$changed" = "1" ] && log "Nowa wersja: $before -> $after" || log "Brak nowych zmian (wersja $after)."
