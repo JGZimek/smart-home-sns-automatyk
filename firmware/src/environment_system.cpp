@@ -1,8 +1,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "driver/gpio.h"
-#include "driver/i2c.h"
 #include "esp_log.h"
 #include <string.h>
 #include <time.h>
@@ -38,48 +38,69 @@ struct FanCommand {
     bool state;    
 };
 
-static QueueHandle_t cmdQueue; 
+static QueueHandle_t cmdQueue;
+
+// Deskryptory i2cdev dla czujników obsługiwanych "ręcznie" (INA219 x2, TSL2591).
+// BME280 ma własny deskryptor zarządzany przez bibliotekę bmp280. Wszystkie
+// współdzielą jeden port I2C zarządzany przez i2cdev (NOWY sterownik) — dzięki
+// czemu nie ma konfliktu starego i nowego sterownika I2C.
+static i2c_dev_t ina1_dev;  // Solar
+static i2c_dev_t ina2_dev;  // Battery
+static i2c_dev_t tsl_dev;   // TSL2591
+
+static void i2cdev_descriptor_init(i2c_dev_t *d, uint8_t addr) {
+    memset(d, 0, sizeof(*d));
+    d->port = I2C_MASTER_NUM;
+    d->addr = addr;
+    d->cfg.sda_io_num = I2C_MASTER_SDA_IO;
+    d->cfg.scl_io_num = I2C_MASTER_SCL_IO;
+    d->cfg.sda_pullup_en = 1;
+    d->cfg.scl_pullup_en = 1;
+    d->cfg.master.clk_speed = I2C_MASTER_FREQ_HZ;
+    i2c_dev_create_mutex(d);
+}
 
 // =========================================================================
-// LEKKIE FUNKCJE I2C (Dla INA219 i TSL2591 - czyste ESP-IDF)
+// ODCZYTY I2C przez i2cdev (INA219, TSL2591)
 // =========================================================================
 
-bool read_ina219(uint8_t addr, float *voltage, float *current, float *power) {
-    uint8_t reg_bus = 0x02; 
+static bool read_ina219(i2c_dev_t *dev, float *voltage, float *current, float *power) {
     uint8_t buf[2];
-    
-    if (i2c_master_write_read_device(I2C_MASTER_NUM, addr, &reg_bus, 1, buf, 2, pdMS_TO_TICKS(100)) != ESP_OK) return false;
-    uint16_t bus_val = (buf[0] << 8) | buf[1];
-    *voltage = (bus_val >> 3) * 0.004f; 
-
-    uint8_t reg_shunt = 0x01; 
-    if (i2c_master_write_read_device(I2C_MASTER_NUM, addr, &reg_shunt, 1, buf, 2, pdMS_TO_TICKS(100)) != ESP_OK) return false;
+    if (xSemaphoreTake(dev->mutex, pdMS_TO_TICKS(100)) != pdTRUE) return false;
+    esp_err_t e_bus   = i2c_dev_read_reg(dev, 0x02, buf, 2);     // rejestr bus voltage
+    uint16_t bus_val  = (buf[0] << 8) | buf[1];
+    esp_err_t e_shunt = i2c_dev_read_reg(dev, 0x01, buf, 2);     // rejestr shunt voltage
     int16_t shunt_val = (buf[0] << 8) | buf[1];
+    xSemaphoreGive(dev->mutex);
+    if (e_bus != ESP_OK || e_shunt != ESP_OK) return false;
+
+    *voltage = (bus_val >> 3) * 0.004f;
     float shunt_mV = shunt_val * 0.01f;
-    
-    *current = shunt_mV / 0.1f;       
-    *power = (*voltage) * (*current); 
+    *current = shunt_mV / 0.1f;
+    *power = (*voltage) * (*current);
     return true;
 }
 
-bool init_tsl2591() {
-    uint8_t data[] = {0xA0 | 0x00, 0x03}; 
-    return i2c_master_write_to_device(I2C_MASTER_NUM, TSL2591_ADDR, data, 2, pdMS_TO_TICKS(100)) == ESP_OK;
+static bool init_tsl2591(i2c_dev_t *dev) {
+    uint8_t enable = 0x03; // ENABLE: PON | AEN
+    if (xSemaphoreTake(dev->mutex, pdMS_TO_TICKS(100)) != pdTRUE) return false;
+    esp_err_t e = i2c_dev_write_reg(dev, 0xA0 | 0x00, &enable, 1);
+    xSemaphoreGive(dev->mutex);
+    return e == ESP_OK;
 }
 
-bool read_tsl2591(float *lux) {
-    uint8_t reg_ch0 = 0xA0 | 0x14; 
+static bool read_tsl2591(i2c_dev_t *dev, float *lux) {
     uint8_t buf[2];
-    if (i2c_master_write_read_device(I2C_MASTER_NUM, TSL2591_ADDR, &reg_ch0, 1, buf, 2, pdMS_TO_TICKS(100)) != ESP_OK) return false;
+    if (xSemaphoreTake(dev->mutex, pdMS_TO_TICKS(100)) != pdTRUE) return false;
+    esp_err_t e_ch0 = i2c_dev_read_reg(dev, 0xA0 | 0x14, buf, 2);
     uint16_t ch0 = (buf[1] << 8) | buf[0];
-
-    uint8_t reg_ch1 = 0xA0 | 0x16; 
-    if (i2c_master_write_read_device(I2C_MASTER_NUM, TSL2591_ADDR, &reg_ch1, 1, buf, 2, pdMS_TO_TICKS(100)) != ESP_OK) return false;
+    esp_err_t e_ch1 = i2c_dev_read_reg(dev, 0xA0 | 0x16, buf, 2);
     uint16_t ch1 = (buf[1] << 8) | buf[0];
+    xSemaphoreGive(dev->mutex);
+    if (e_ch0 != ESP_OK || e_ch1 != ESP_OK) return false;
 
     if (ch0 == 0) { *lux = 0; return true; }
-    
-    float cpl = (100.0F * 25.0F) / 408.0F; 
+    float cpl = (100.0F * 25.0F) / 408.0F;
     float calc_lux = ((float)ch0 - (float)ch1) * (1.0F - ((float)ch1 / (float)ch0)) / cpl;
     *lux = calc_lux > 0 ? calc_lux : 0;
     return true;
@@ -132,50 +153,38 @@ static void control_task(void *pvParameters) {
     }
 }
 
-// Instaluje magistralę I2C starym sterownikiem (dla surowych odczytów INA219/TSL2591).
-// Używane jako fallback, gdy i2cdev nie przejęło portu. Błąd „already installed"
-// jest celowo ignorowany — istotne jest tylko, by sterownik na porcie był dostępny.
-static void ensure_i2c_bus_installed(void) {
-    i2c_config_t conf = {};
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_MASTER_SDA_IO;
-    conf.scl_io_num = I2C_MASTER_SCL_IO;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
-    conf.clk_flags = I2C_SCLK_SRC_FLAG_FOR_NOMAL;
-    i2c_param_config(I2C_MASTER_NUM, &conf);
-    i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
-}
-
 // --- ZADANIE: ODCZYT CZUJNIKÓW I PUBLIKACJA ---
 static void sensor_task(void *pvParameters) {
     ESP_LOGI(TAG_ENV, "Sensor Task Started");
 
-    // 1. BME280 jako PIERWSZY — biblioteka i2cdev przejmuje (instaluje) magistralę I2C.
-    //    Dzięki temu na porcie jest tylko JEDEN sterownik (legacy), bez konfliktu driver_ng.
+    // 0. Inicjalizacja podsystemu i2cdev (raz). Zarządza on jedną magistralą I2C
+    //    na porcie, współdzieloną przez wszystkie czujniki — bez konfliktu sterowników.
+    if (i2cdev_init() != ESP_OK) {
+        ESP_LOGE(TAG_ENV, "i2cdev_init nieudane — odczyty I2C niedostepne");
+    }
+
+    // 1. BME280 (biblioteka bmp280 na i2cdev)
     bmp280_t bme_dev;
     memset(&bme_dev, 0, sizeof(bmp280_t));
     bool bme_ok = false;
-
-    if (i2cdev_init() == ESP_OK) {
-        if (bmp280_init_desc(&bme_dev, BMP280_I2C_ADDRESS_0, I2C_MASTER_NUM, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO) == ESP_OK) {
-            bmp280_params_t params;
-            bmp280_init_default_params(&params);
-            if (bmp280_init(&bme_dev, &params) == ESP_OK) {
-                bme_ok = true;
-                bool is_bme280 = bme_dev.id == BME280_CHIP_ID;
-                ESP_LOGI(TAG_ENV, "Czujnik %s odnaleziony i skalibrowany", is_bme280 ? "BME280" : "BMP280");
-            }
+    if (bmp280_init_desc(&bme_dev, BMP280_I2C_ADDRESS_0, I2C_MASTER_NUM, I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO) == ESP_OK) {
+        bme_dev.i2c_dev.cfg.master.clk_speed = I2C_MASTER_FREQ_HZ; // 100 kHz jak reszta magistrali (domyślnie lib daje 1 MHz)
+        bmp280_params_t params;
+        bmp280_init_default_params(&params);
+        if (bmp280_init(&bme_dev, &params) == ESP_OK) {
+            bme_ok = true;
+            bool is_bme280 = bme_dev.id == BME280_CHIP_ID;
+            ESP_LOGI(TAG_ENV, "Czujnik %s odnaleziony i skalibrowany", is_bme280 ? "BME280" : "BMP280");
         }
     }
-    if (!bme_ok) {
-        ESP_LOGE(TAG_ENV, "Nie odnaleziono BME280/BMP280");
-        ensure_i2c_bus_installed(); // gdy i2cdev nie postawiło magistrali — dla INA219/TSL2591
-    }
+    if (!bme_ok) ESP_LOGE(TAG_ENV, "Nie odnaleziono BME280/BMP280");
 
-    // 2. TSL2591 — surowy odczyt na już zainstalowanej magistrali
-    bool tsl_ok = init_tsl2591();
+    // 2. Deskryptory INA219 x2 + TSL2591 (ten sam port I2C przez i2cdev)
+    i2cdev_descriptor_init(&ina1_dev, INA1_ADDR);
+    i2cdev_descriptor_init(&ina2_dev, INA2_ADDR);
+    i2cdev_descriptor_init(&tsl_dev, TSL2591_ADDR);
+
+    bool tsl_ok = init_tsl2591(&tsl_dev);
     if (tsl_ok) ESP_LOGI(TAG_ENV, "TSL2591 odnaleziony i zainicjowany");
     else ESP_LOGE(TAG_ENV, "Nie odnaleziono TSL2591");
 
@@ -187,7 +196,7 @@ static void sensor_task(void *pvParameters) {
 
         // Odczyt Światła
         float lux;
-        if (tsl_ok && read_tsl2591(&lux)) {
+        if (tsl_ok && read_tsl2591(&tsl_dev, &lux)) {
             snprintf(payload, sizeof(payload), "{\"value\": %.2f, \"ts\": %lld}", lux, (long long)now);
             mqtt_publish("home/garden/environment/light", payload, 1, 0);
         }
@@ -211,7 +220,7 @@ static void sensor_task(void *pvParameters) {
 
         // Odczyt Solara
         float v, c, p;
-        if (read_ina219(INA1_ADDR, &v, &c, &p)) {
+        if (read_ina219(&ina1_dev, &v, &c, &p)) {
             snprintf(payload, sizeof(payload), "{\"value\": %.2f, \"ts\": %lld}", v, (long long)now);
             mqtt_publish("home/garden/power/solar/voltage", payload, 1, 0);
             snprintf(payload, sizeof(payload), "{\"value\": %.4f, \"ts\": %lld}", c / 1000.0, (long long)now);
@@ -221,7 +230,7 @@ static void sensor_task(void *pvParameters) {
         }
 
         // Odczyt Baterii
-        if (read_ina219(INA2_ADDR, &v, &c, &p)) {
+        if (read_ina219(&ina2_dev, &v, &c, &p)) {
             snprintf(payload, sizeof(payload), "{\"value\": %.2f, \"ts\": %lld}", v, (long long)now);
             mqtt_publish("home/garden/power/battery/voltage", payload, 1, 0);
             snprintf(payload, sizeof(payload), "{\"value\": %.4f, \"ts\": %lld}", c / 1000.0, (long long)now);
