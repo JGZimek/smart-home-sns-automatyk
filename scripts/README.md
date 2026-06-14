@@ -56,6 +56,7 @@ smarthome logs <usługa>       # monitor | wifi | lcd | health | broker
 smarthome broker <up|down|restart|logs>
 smarthome update              # git pull + ponowny setup
 smarthome tailscale status    # przekazanie do tailscale
+smarthome tailscale-reauth    # przełącz na osobny tailnet projektowy (TAILSCALE_AUTHKEY)
 ```
 
 `kind` = `security` | `access` | `environment` | `system`.
