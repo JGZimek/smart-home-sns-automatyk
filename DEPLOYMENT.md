@@ -102,11 +102,52 @@ tailscale serve status              # pokaze URL
 Makietę przewozisz w inne miejsce / zmieniasz router. Trzeba ustawić **i Pi, i ESP-ki** na nową sieć.
 
 ### 3.1. Raspberry Pi → nowa sieć
-- **Ubuntu domyślnie (networkd/netplan):** edytuj `/etc/netplan/50-cloud-init.yaml` (sekcja `wifis: wlan0:` →
-  nowy SSID/hasło), potem `sudo netplan apply`. Najlepiej z konsoli/HDMI lub przez Tailscale (link `100.x`
-  przeżyje zmianę sieci, o ile nowa sieć ma internet).
-- **Jeśli zmigrowałeś Wi-Fi do NetworkManagera** (dla AP fallback): `sudo nmcli dev wifi connect "<SSID>" password "<HASLO>"`.
+
+**Z dashboardu** (`http://rpi-smarthome.local:8080` lub przez Tailscale): karta **„Sieć Wi-Fi"** — skan,
+wybór sieci, hasło, „Połącz", oraz przyciski „Portal"/„Skanuj". Wymaga NetworkManagera (`migrate-nm`, niżej).
+Przełączaj **przez Tailscale**, bo zmiana zrywa dostęp przez bieżącą sieć.
+
+**Z CLI** — poleceniem **`smarthome wifi`** (działa lokalnie, **bez internetu** — z konsoli/HDMI lub SSH po LAN/Tailscale):
+
+```bash
+smarthome wifi                              # status: aktywna siec, IP, zapisane sieci
+smarthome wifi list                         # skan sieci w zasiegu
+sudo smarthome wifi connect "<SSID>" "<HASLO>"   # przepiecie na nowa siec
+sudo smarthome wifi forget "<SSID>"         # usuniecie zapisanej sieci
+```
+
+**Nie masz dostępu do Pi (brak konsoli/SSH) i brak internetu?** Wymuś portal konfiguracyjny z telefonu:
+
+```bash
+sudo smarthome wifi portal                  # podnosi AP 'SmartHome-Config' na zadanie
+#  -> polacz telefon z AP, otworz http://10.42.0.1, podaj nowa siec
+sudo smarthome wifi portal off              # anuluj (powrot do zapisanej sieci)
+```
+
+Portal na żądanie działa nawet, gdy Pi jest jeszcze połączone ze starą siecią — w odróżnieniu od
+automatycznego AP fallback (usługa `smarthome-wifi-fallback`), który podnosi się dopiero po **utracie**
+łączności.
+
+**Wymóg:** `connect`/`portal`/AP fallback działają tylko gdy Wi-Fi jest pod **NetworkManagerem**
+(Ubuntu Server używa networkd). Przełączenie następuje **po reboocie** — komenda niczego nie zrywa na żywo:
+
+```bash
+sudo smarthome wifi migrate-nm "<TWOJ_SSID>" "<HASLO>"   # przygotowanie (bez zrywania sieci)
+sudo reboot                                              # MIEJ KONSOLĘ HDMI – po reboocie NM przejmuje wlan0
+# po reboocie:
+sudo sed -i 's/^AP_FALLBACK_ENABLE=.*/AP_FALLBACK_ENABLE=1/' /etc/smarthome/smarthome.env
+sudo smarthome update
+```
+⚠️ Jeśli po reboocie NM nie połączy z Wi-Fi, **Tailscale też padnie** — stąd wymóg konsoli HDMI przy
+pierwszej migracji. Powrót: `sudo rm /etc/netplan/99-networkmanager.yaml /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg && sudo netplan apply`.
+
+- Alternatywnie ręcznie: `sudo nmcli dev wifi connect "<SSID>" password "<HASLO>"`.
 - Tailscale i konto brokera nie wymagają zmian. mDNS (`rpi-smarthome.local`) działa dalej po połączeniu.
+
+**Straciłeś dostęp do Pi?** Kolejność ratunku:
+1. Pi **bez żadnej sieci** → po ~90 s само stawia AP `SmartHome-Config` (jeśli AP fallback włączony) → telefon → `http://10.42.0.1`.
+2. Pi **ma internet** w innej sieci → wejdź przez Tailscale `ssh smarthome@100.x` → `sudo smarthome wifi connect ...`.
+3. Ostateczność → konsola HDMI/klawiatura lub edycja sieci na karcie SD.
 
 ### 3.2. ESP-ki → nowa sieć
 Poświadczenia Wi-Fi w ESP są w pamięci NVS. Aby je zmienić:
@@ -143,7 +184,12 @@ Wszystkie nastawy w jednym pliku. Po edycji: `sudo smarthome update` (lub restar
 ---
 
 ## 5. Aktualizacja i OTA
-- **Serwer:** `sudo smarthome update` (git pull + ponowny setup, idempotentnie).
+- **Serwer (CLI):** `sudo smarthome update` (git pull + ponowny setup + restart usług, idempotentnie).
+  Pi **nie aktualizuje się samo** — to świadoma akcja.
+- **Serwer (z dashboardu):** przycisk **„Sprawdz i zainstaluj aktualizacje"** na karcie serwera
+  (`http://rpi-smarthome.local:8080`). Web (user `smarthome`) tworzy plik-wyzwalacz, a rootowa usługa
+  `smarthome-update` wykonuje to samo co `smarthome update`. Wynik (wersja, „nowa/bez zmian") pojawia się
+  na karcie serwera po odświeżeniu. Wyłącznik: `WEB_UPDATE_ENABLE=0` (gdy dashboard wystawiony poza zaufany LAN/Tailscale).
 - **Firmware ESP (zdalnie):** `smarthome ota <kind> <plik.bin>` lub z GitHub Actions — patrz
   [firmware/OTA_UPDATE.md](firmware/OTA_UPDATE.md).
 

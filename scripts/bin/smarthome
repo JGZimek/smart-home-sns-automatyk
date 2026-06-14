@@ -44,6 +44,7 @@ smarthome – zarzadzanie serwerem Smart Home i wezlami ESP
   smarthome ota <kind> <plik|url>  Zdalny OTA: plik .bin (hostowany na Pi) lub gotowy URL
   smarthome set <topic> <payload>  Surowa publikacja MQTT (np. sterowanie aktuatorem)
   smarthome watch [topic]          Podglad ruchu MQTT (domyslnie home/#)
+  smarthome wifi <...>             Siec Wi-Fi serwera (status|list|connect|forget|portal) – dziala offline
   smarthome logs [usluga]          Logi: monitor|wifi|lcd|health|broker (domyslnie monitor)
   smarthome broker <up|down|restart|logs>   Sterowanie kontenerem brokera
   smarthome update                 git pull + ponowny setup (aktualizacja serwera)
@@ -181,12 +182,227 @@ cmd_broker() {
   esac
 }
 
+# ==========================================================
+# Wi-Fi serwera – rekonfiguracja/przepiecie sieci, dziala lokalnie (bez internetu).
+# Operacje zmieniajace siec wymagaja root (nmcli). 'portal' wymusza AP konfiguracyjny
+# na zadanie, nawet gdy serwer jest jeszcze polaczony (wspolpracuje z usluga
+# smarthome-wifi-fallback przez plik-wyzwalacz $STATE_DIR/force_portal).
+# ==========================================================
+FORCE_PORTAL_FILE="$STATE_DIR/force_portal"
+# Plik-zadanie z dashboardu (web pisze, rootowa usluga smarthome-wifi-apply wykonuje).
+WIFI_REQUEST_FILE="$STATE_DIR/wifi_request"
+
+_wifi_need_root() { [ "$(id -u)" -eq 0 ] || die "Ta operacja zmienia siec i wymaga root: poprzedz poleceniem 'sudo'."; }
+
+# Zapisuje biezacy stan Wi-Fi do plikow tekstowych czytanych przez dashboard
+# (bez JSON-a w bashu): aktywna siec + lista sieci w zasiegu.
+_wifi_write_status() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  { nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null || true; } \
+    | awk -F: '$2=="wlan0"{print $1; exit}' > "$STATE_DIR/wifi_current.txt" 2>/dev/null || true
+  { nmcli -t -f SSID device wifi list 2>/dev/null || true; } \
+    | awk 'NF && !seen[$0]++' > "$STATE_DIR/wifi_networks.txt" 2>/dev/null || true
+}
+
+cmd_wifi() {
+  local action="${1:-status}"; shift || true
+  # migrate-nm sam instaluje NetworkManagera (bootstrap), wiec NIE wymaga nmcli z gory.
+  if [ "$action" != "migrate-nm" ]; then
+    have nmcli || die "Brak nmcli. Najpierw zmigruj Wi-Fi: sudo smarthome wifi migrate-nm \"<SSID>\" \"<HASLO>\""
+  fi
+  case "$action" in
+    status|"")
+      printf '%s== Wi-Fi serwera ==%s\n' "$C_BOLD" "$C_RESET"
+      { nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null || true; } | \
+        awk -F: '$2=="wifi"||$2=="ethernet"{printf "  %-8s %-9s %-13s %s\n",$1,$2,$3,$4}'
+      printf 'IP lokalne      : %s\n' "$(hostname -I 2>/dev/null | xargs)"
+      printf 'Zapisane sieci  :\n'
+      { nmcli -t -f NAME,TYPE connection show 2>/dev/null || true; } | awk -F: '$2 ~ /wireless/{print "  - "$1}'
+      [ -e "$FORCE_PORTAL_FILE" ] && warn "Wymuszony portal jest AKTYWNY (wylacz: sudo smarthome wifi portal off)."
+      ;;
+    list|scan)
+      nmcli device wifi rescan 2>/dev/null || true
+      nmcli -f IN-USE,SSID,SIGNAL,SECURITY device wifi list
+      ;;
+    connect)
+      local ssid="${1:-}" pass="${2:-}"
+      [ -z "$ssid" ] && die "Uzycie: sudo smarthome wifi connect <ssid> [haslo]"
+      _wifi_need_root
+      warn "Przelaczam serwer na siec '$ssid'. Jesli laczysz sie po SSH przez te Wi-Fi, sesja moze zerwac."
+      if [ -n "$pass" ]; then
+        nmcli device wifi connect "$ssid" password "$pass"
+      else
+        nmcli device wifi connect "$ssid"
+      fi
+      rm -f "$FORCE_PORTAL_FILE" 2>/dev/null || true
+      ok "Zlecono polaczenie z '$ssid'. Sprawdz: smarthome wifi status"
+      ;;
+    forget)
+      local ssid="${1:-}"
+      [ -z "$ssid" ] && die "Uzycie: sudo smarthome wifi forget <ssid>"
+      _wifi_need_root
+      nmcli connection delete "$ssid" && ok "Usunieto zapisana siec '$ssid'."
+      ;;
+    migrate-nm)
+      _wifi_need_root
+      local ssid="${1:-}" pass="${2:-}"
+      [ -z "$ssid" ] && ssid="$(iwgetid -r 2>/dev/null || true)"
+      [ -z "$ssid" ] && die "Uzycie: sudo smarthome wifi migrate-nm <SSID> <HASLO>  (podaj SWOJA siec)"
+      warn "Przygotowuje przejscie Wi-Fi na NetworkManager. Zmiana wejdzie DOPIERO PO REBOOCIE."
+      warn "NIE zrywa polaczenia teraz – ale po reboocie, jesli NM nie polaczy, Tailscale tez padnie."
+      warn "MIEJ KONSOLE HDMI POD REKA przy pierwszym rebootcie."
+
+      # 1. NetworkManager (instalator celowo go nie wgrywa – robimy to tu, swiadomie).
+      if ! have nmcli; then
+        log "Instaluje network-manager..."
+        wait_for_apt
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq network-manager || die "Instalacja network-manager nieudana."
+      fi
+
+      # 2. Profil NM zapisany OFFLINE (keyfile), BEZ uruchamiania NM teraz.
+      #    Dzieki temu nie ma konfliktu o wlan0 z dzialajacym networkd – przelaczenie
+      #    nastapi czysto przy reboocie, a NM polaczy z ta siecia z autoconnect.
+      mkdir -p /etc/NetworkManager/system-connections
+      local kf="/etc/NetworkManager/system-connections/${ssid}.nmconnection"
+      local uuid; uuid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo '')"
+      {
+        echo "[connection]"
+        echo "id=${ssid}"
+        [ -n "$uuid" ] && echo "uuid=${uuid}"
+        echo "type=wifi"
+        echo "interface-name=wlan0"
+        echo "autoconnect=true"
+        echo ""
+        echo "[wifi]"
+        echo "mode=infrastructure"
+        echo "ssid=${ssid}"
+        echo ""
+        if [ -n "$pass" ]; then
+          echo "[wifi-security]"
+          echo "key-mgmt=wpa-psk"
+          echo "psk=${pass}"
+          echo ""
+        fi
+        echo "[ipv4]"
+        echo "method=auto"
+        echo ""
+        echo "[ipv6]"
+        echo "method=auto"
+      } > "$kf"
+      chmod 600 "$kf"
+      log "Zapisano profil NM: $kf"
+
+      # 3. Renderer netplan -> NM + wylaczenie zarzadzania siecia przez cloud-init,
+      #    by po reboocie networkd NIE przejal wlan0 (to powodowalo stan 'unavailable').
+      cat > /etc/netplan/99-networkmanager.yaml <<'NPEOF'
+network:
+  version: 2
+  renderer: NetworkManager
+NPEOF
+      chmod 600 /etc/netplan/99-networkmanager.yaml
+      mkdir -p /etc/cloud/cloud.cfg.d
+      printf 'network: {config: disabled}\n' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+
+      # 4. Wygeneruj backendy (NIE 'apply' – zadnej zmiany na zywo, przelaczenie przy reboocie).
+      netplan generate 2>/dev/null || true
+      systemctl enable NetworkManager >/dev/null 2>&1 || true
+
+      ok "Gotowe. System dziala dalej na networkd; przejscie na NM nastapi po restarcie."
+      printf '\n    >>> ZRESTARTUJ PI:  sudo reboot  <<<\n\n'
+      log "Po reboocie NM przejmie wlan0 i polaczy z '$ssid'. Potem: AP_FALLBACK_ENABLE=1 + 'sudo smarthome update'."
+      warn "Powrot awaryjny (z konsoli, gdyby NM nie wstal): sudo rm /etc/netplan/99-networkmanager.yaml /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg && sudo netplan apply"
+      ;;
+    portal)
+      _wifi_need_root
+      if [ "${1:-}" = "off" ]; then
+        rm -f "$FORCE_PORTAL_FILE" 2>/dev/null || true
+        # Zdejmij AP, by NetworkManager wrocil do zapisanej sieci (autoconnect).
+        nmcli connection down "${AP_SSID:-SmartHome-Config}" 2>/dev/null || true
+        nmcli connection delete "${AP_SSID:-SmartHome-Config}" 2>/dev/null || true
+        ok "Wymuszony portal wylaczony – serwer wraca do zapisanej sieci."
+      else
+        mkdir -p "$STATE_DIR" 2>/dev/null || true
+        : > "$FORCE_PORTAL_FILE"
+        ok "Wymuszam portal Wi-Fi. Za chwile pojawi sie AP '${AP_SSID:-SmartHome-Config}'."
+        log "Polacz telefon z tym AP i otworz http://10.42.0.1  (wylacz: sudo smarthome wifi portal off)"
+      fi
+      ;;
+    scan)
+      _wifi_need_root
+      nmcli device wifi rescan 2>/dev/null || true
+      sleep 2
+      _wifi_write_status
+      ok "Skan zapisany ($STATE_DIR/wifi_networks.txt)."
+      ;;
+    apply-request)
+      # Wykonawca zadan z dashboardu. Czyta $WIFI_REQUEST_FILE (format klucz=wartosc),
+      # wykonuje akcje przez nmcli i odswieza pliki stanu. Wolane przez root (usluga).
+      _wifi_need_root
+      if [ ! -f "$WIFI_REQUEST_FILE" ]; then _wifi_write_status; return 0; fi
+      local a="" s="" p="" k v
+      while IFS='=' read -r k v; do
+        case "$k" in action) a="$v" ;; ssid) s="$v" ;; pass) p="$v" ;; esac
+      done < "$WIFI_REQUEST_FILE"
+      rm -f "$WIFI_REQUEST_FILE" 2>/dev/null || true
+      log "Zadanie Wi-Fi z dashboardu: action=$a ssid=$s"
+      case "$a" in
+        connect)
+          if [ -n "$s" ] && [ -n "$p" ]; then nmcli device wifi connect "$s" password "$p" || true
+          elif [ -n "$s" ]; then nmcli device wifi connect "$s" || true; fi
+          rm -f "$FORCE_PORTAL_FILE" 2>/dev/null || true ;;
+        forget)      [ -n "$s" ] && { nmcli connection delete "$s" || true; } ;;
+        portal)      : > "$FORCE_PORTAL_FILE" ;;
+        portal-off)  rm -f "$FORCE_PORTAL_FILE" 2>/dev/null || true
+                     nmcli connection down "${AP_SSID:-SmartHome-Config}" 2>/dev/null || true
+                     nmcli connection delete "${AP_SSID:-SmartHome-Config}" 2>/dev/null || true ;;
+        scan)        nmcli device wifi rescan 2>/dev/null || true; sleep 2 ;;
+        *)           warn "Nieznana akcja Wi-Fi: $a" ;;
+      esac
+      _wifi_write_status
+      ;;
+    *)
+      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]|scan|migrate-nm <ssid> <haslo>>"
+      ;;
+  esac
+}
+
 cmd_update() {
   [ "$(id -u)" -eq 0 ] || die "Aktualizacja wymaga sudo: sudo smarthome update"
-  log "Aktualizuje repo ($REPO_DIR)..."
-  git -C "$REPO_DIR" pull --ff-only
+  local status_file="$STATE_DIR/update_status.json"
+  local before after changed=0 ok=1
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+  # Git jako root w repo nalezacym do innego usera -> unikamy "dubious ownership".
+  git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+  before="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  printf '{"state":"running","started":"%s","before":"%s"}\n' "$(date -Is)" "$before" \
+    > "$status_file" 2>/dev/null || true
+
+  log "Sprawdzam i pobieram zmiany ($REPO_DIR)..."
+  # Model wezla wdrozeniowego: working tree = lustro origin. Twarde wyrownanie
+  # (fetch + reset --hard) jest odporne na lokalny drift plikow na Pi (inaczej
+  # 'pull' wywala sie na 'local changes would be overwritten'). Konfiguracja
+  # uzytkownika nie jest w repo (siedzi w /etc/smarthome), wiec nic nie tracimy.
+  local branch
+  branch="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo develop)"
+  if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then branch="${REPO_BRANCH:-develop}"; fi
+  git -C "$REPO_DIR" fetch --prune origin || ok=0
+  git -C "$REPO_DIR" reset --hard "origin/$branch" || ok=0
+  after="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  [ "$before" != "$after" ] && changed=1
+  [ "$changed" = "1" ] && log "Nowa wersja: $before -> $after" || log "Brak nowych zmian (wersja $after)."
+
   log "Uruchamiam ponownie setup..."
-  bash "$SCRIPTS_DIR/setup.sh"
+  bash "$SCRIPTS_DIR/setup.sh" || ok=0
+
+  # Restart uslug aplikacyjnych, by zmiany w ich kodzie weszly w zycie (enable --now
+  # samo nie restartuje juz dzialajacej uslugi). try-restart = tylko gdy aktywna.
+  systemctl try-restart smarthome-node-monitor smarthome-wifi-fallback smarthome-lcd 2>/dev/null || true
+
+  printf '{"state":"done","finished":"%s","before":"%s","after":"%s","changed":%s,"ok":%s}\n' \
+    "$(date -Is)" "$before" "$after" "$changed" "$ok" > "$status_file" 2>/dev/null || true
+  [ "$ok" = "1" ] && ok "Aktualizacja zakonczona." || die "Aktualizacja zakonczona z bledami (patrz wyzej)."
 }
 
 main() {
@@ -198,6 +414,7 @@ main() {
     ota)       cmd_ota "$@" ;;
     set)       cmd_set "$@" ;;
     watch)     cmd_watch "$@" ;;
+    wifi)      cmd_wifi "$@" ;;
     logs)      cmd_logs "$@" ;;
     broker)    cmd_broker "$@" ;;
     update)    cmd_update "$@" ;;

@@ -29,6 +29,10 @@ AP_PASS = os.environ.get("AP_PASS", "").strip()
 GRACE_S = int(os.environ.get("AP_GRACE_S", "90"))
 CHECK_INTERVAL_S = 15
 PORT = 80
+# Plik-wyzwalacz: gdy istnieje, portal AP jest wymuszony na zadanie (nawet gdy Pi
+# jest jeszcze polaczone) – pozwala przepiac siec bez czekania na utrate polaczenia.
+# Tworzy/usuwa go: `sudo smarthome wifi portal [off]`.
+FORCE_PORTAL_FILE = os.environ.get("FORCE_PORTAL_FILE", "/var/lib/smarthome/force_portal")
 
 app = Flask(__name__)
 _ap_active = threading.Event()
@@ -43,15 +47,17 @@ def nmcli(*args, check=False):
 
 
 def nm_manages_wifi():
-    """True tylko gdy NetworkManager zarzadza jakims interfejsem Wi-Fi.
-    Na Ubuntu Server (networkd) wlan0 bywa 'unmanaged' – wtedy NIE ruszamy sieci."""
+    """True tylko gdy NetworkManager realnie zarzadza interfejsem Wi-Fi w UZYWALNYM
+    stanie. 'unmanaged' (networkd trzyma wlan0) oraz 'unavailable' (radio nie wstalo
+    / konflikt z networkd) traktujemy jako NIE-zarzadza – wtedy usluga jest bezczynna
+    zamiast bez sensu probowac podnosic AP w petli."""
     try:
         out = nmcli("-t", "-f", "DEVICE,TYPE,STATE", "device")
     except FileNotFoundError:
         return False
     for line in out.stdout.strip().splitlines():
         parts = line.split(":")
-        if len(parts) >= 3 and parts[1] == "wifi" and parts[2] != "unmanaged":
+        if len(parts) >= 3 and parts[1] == "wifi" and parts[2] not in ("unmanaged", "unavailable"):
             return True
     return False
 
@@ -122,30 +128,69 @@ def connect_wifi(ssid, password):
     r = nmcli(*args)
     if r.returncode == 0:
         log("Polaczono z '%s'." % ssid)
+        # Udana zmiana sieci kasuje ewentualny wymuszony portal.
+        try:
+            os.remove(FORCE_PORTAL_FILE)
+        except OSError:
+            pass
         return True
     log("Polaczenie nieudane: %s" % r.stderr.strip())
     return False
 
 
-PAGE = """<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8">
+# Skan sieci w zasiegu (z krotkim cache – sondy captive-portal sa czeste).
+_scan = {"ts": 0.0, "nets": []}
+
+
+def scan_networks():
+    now = time.time()
+    if now - _scan["ts"] < 15 and _scan["nets"]:
+        return _scan["nets"]
+    nets = []
+    try:
+        nmcli("device", "wifi", "rescan")
+        time.sleep(1.5)
+        out = nmcli("-t", "-f", "SSID", "device", "wifi", "list")
+        for line in out.stdout.splitlines():
+            s = line.strip()
+            if s and s not in nets:
+                nets.append(s)
+    except Exception as e:
+        log("Skan sieci nieudany: %s" % e)
+    _scan["ts"] = now
+    _scan["nets"] = nets
+    return nets
+
+
+PAGE_TMPL = """<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Smart Home – konfiguracja Wi-Fi</title>
 <style>body{font-family:system-ui,sans-serif;background:#0f1620;color:#e6edf3;text-align:center;padding:24px}
 .box{background:#161e29;max-width:380px;margin:0 auto;padding:24px;border-radius:12px;border:1px solid #2a3441}
-h2{margin-top:0}input{width:100%%;padding:12px;margin:8px 0;border-radius:6px;border:1px solid #2a3441;background:#0f1620;color:#e6edf3;box-sizing:border-box}
-button{width:100%%;padding:12px;background:#238636;color:#fff;border:0;border-radius:6px;font-size:16px;cursor:pointer}
+h2{margin-top:0}input{width:100%;padding:12px;margin:8px 0;border-radius:6px;border:1px solid #2a3441;background:#0f1620;color:#e6edf3;box-sizing:border-box}
+button{width:100%;padding:12px;background:#238636;color:#fff;border:0;border-radius:6px;font-size:16px;cursor:pointer}
 p{color:#8b98a5;font-size:14px}</style></head><body>
 <div class="box"><h2>Smart Home – Wi-Fi</h2>
-<p>Serwer nie ma polaczenia z siecia. Podaj dane Wi-Fi (pasmo 2.4&nbsp;GHz).</p>
+<p>Serwer nie ma polaczenia z siecia. Wybierz lub wpisz siec (pasmo 2.4&nbsp;GHz).</p>
 <form action="/connect" method="post">
-<input name="ssid" placeholder="Nazwa sieci (SSID)" required>
+<input name="ssid" list="nets" placeholder="Nazwa sieci (SSID)" required>
+<datalist id="nets">__OPTIONS__</datalist>
 <input name="password" type="password" placeholder="Haslo Wi-Fi">
-<button type="submit">Polacz</button></form></div></body></html>"""
+<button type="submit">Polacz</button></form>
+<p style="font-size:12px">Nie widzisz swojej sieci? Odswiez strone.</p>
+</div></body></html>"""
+
+
+def render_page():
+    opts = "".join(
+        '<option value="%s">' % n.replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
+        for n in scan_networks())
+    return PAGE_TMPL.replace("__OPTIONS__", opts)
 
 
 @app.route("/")
 def index():
-    return PAGE
+    return render_page()
 
 
 # Przechwyc typowe sondy captive-portal, by telefon sam otworzyl strone.
@@ -153,7 +198,7 @@ def index():
 @app.route("/hotspot-detect.html")
 @app.route("/ncsi.txt")
 def captive():
-    return PAGE
+    return render_page()
 
 
 @app.route("/connect", methods=["POST"])
@@ -199,6 +244,15 @@ def main():
     down_since = None
     while True:
         if not nm_manages_wifi():
+            time.sleep(CHECK_INTERVAL_S)
+            continue
+        # Portal na zadanie: trzymaj AP niezaleznie od stanu polaczenia, dopoki
+        # wyzwalacz istnieje (uzytkownik chce przepiac siec z telefonu).
+        if os.path.exists(FORCE_PORTAL_FILE):
+            down_since = None
+            if not _ap_active.is_set():
+                log("Wymuszono portal na zadanie (%s) – podnosze AP." % FORCE_PORTAL_FILE)
+                start_ap()
             time.sleep(CHECK_INTERVAL_S)
             continue
         if has_connectivity():

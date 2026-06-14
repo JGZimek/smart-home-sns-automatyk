@@ -67,6 +67,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG_MQTT, "POMYSLNIE polaczono z dynamicznym Brokerem MQTT!");
             s_mqtt_fail_cnt = 0;
+            network_notify_broker_connected();   // wyłącza watchdog provisioningu
             esp_mqtt_client_subscribe(client, OTA_TOPIC, 1);
             esp_mqtt_client_subscribe(client, CMD_TOPIC, 1);   // wspólny kanał komend (reboot/reset_wifi/...)
             // Retained ONLINE; broker automatycznie nadpisze go LWT "OFFLINE" przy zerwaniu

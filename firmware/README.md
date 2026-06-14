@@ -61,7 +61,7 @@ W VS Code: dolny pasek PlatformIO → wybór środowiska (`env:...`) → Build /
 ## Cykl życia węzła (`main.cpp`)
 
 1. Inicjalizacja NVS (z auto-naprawą przy niezgodnej wersji).
-2. `wifi_init_and_prov()` – jeśli brak poświadczeń, startuje BLE provisioning; w przeciwnym razie łączy się z zapisaną siecią. Po **5 nieudanych próbach** automatycznie wraca do BLE provisioningu (fallback).
+2. `wifi_init_and_prov()` – jeśli brak poświadczeń, startuje BLE provisioning; w przeciwnym razie łączy się z zapisaną siecią. Po **5 nieudanych próbach** połączenia z Wi-Fi wraca do BLE provisioningu; dodatkowo, jeśli Wi-Fi działa, ale **broker jest nieosiągalny od startu**, po ~3 min również wraca do provisioningu (patrz „Odporność").
 3. Po uzyskaniu IP startuje `mqtt_discovery_task`, który przez mDNS znajduje `rpi-smarthome` i łączy z brokerem MQTT.
 4. Uruchamiana jest logika wybranego modułu (zadania FreeRTOS na rdzeniu 1).
 
@@ -99,7 +99,8 @@ Logika wspólna dla wszystkich modułów: [src/device_core.cpp](src/device_core.
 ### Odporność / plug-and-play
 
 - **Brak znanej sieci Wi-Fi** → po 5 nieudanych próbach automatyczny powrót do BLE provisioningu.
-- **Broker nieosiągalny** (zgaszony lub zmienił IP) → po serii nieudanych prób węzeł ponawia wykrywanie brokera przez mDNS (`mqtt_reconnect_task`).
+- **Wi-Fi łączy się, ale broker nieosiągalny od startu** (np. zapisana stara/nieaktualna sieć, w której nie ma brokera) → po `BROKER_PROV_TIMEOUT_S` (domyślnie 180 s) węzeł **wraca do BLE provisioningu**, umożliwiając wskazanie nowej sieci. Watchdog **nie kasuje** zapisanych poświadczeń i **nie dotyczy** węzła, który choć raz połączył się z brokerem — dzięki temu chwilowa awaria brokera na działającej makiecie nie wymusza ponownego parowania (`broker_watchdog_task`).
+- **Broker znika po wcześniejszym połączeniu** (zgaszony lub zmienił IP) → węzeł ponawia wykrywanie brokera przez mDNS, bez wchodzenia w provisioning (`mqtt_reconnect_task`).
 - **Praca offline** – logika sprzętowa (alarm, klawiatura, RFID, wentylatory) działa lokalnie nawet bez połączenia z brokerem.
 
 ## Dokumentacja powiązana
