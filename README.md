@@ -42,7 +42,6 @@ Projekt jest tak zaprojektowany, by był **plug-and-play**: po jednorazowej konf
 | [`mosquitto/`](mosquitto/) | Konfiguracja brokera MQTT (uruchamiany przez `docker-compose.yml`). |
 | `backend/` | Aplikacja serwerowa – *placeholder, w budowie*. |
 | `frontend/` | Interfejs WWW – *placeholder, w budowie*. |
-| [`CLAUDE.md`](CLAUDE.md) | Wskazówki dla asystentów AI pracujących w repo. |
 
 ---
 

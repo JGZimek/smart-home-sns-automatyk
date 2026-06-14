@@ -109,7 +109,7 @@ Stacja pogodowa, pomiar zasilania, wentylacja. Kod: `src/environment_system.cpp`
 | `home/garden/power/battery/current` | ❌ | `{"value":0.0500,"ts":...}` | A |
 | `home/garden/power/battery/power` | ❌ | `{"value":0.1950,"ts":...}` | W |
 
-> **`ts`** to znacznik czasu epoch z zegara ESP32. Obecnie **niewiarygodny** (brak synchronizacji NTP w firmware) — backend powinien stemplować czas własnym zegarem przy odbiorze. (Patrz „Znane ograniczenia" w `CLAUDE.md`.)
+> **`ts`** to znacznik czasu epoch z zegara ESP32. Obecnie **niewiarygodny** (brak synchronizacji NTP w firmware) — backend powinien stemplować czas własnym zegarem przy odbiorze.
 
 ---
 
