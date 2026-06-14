@@ -50,11 +50,13 @@ smarthome cmd <kind> <komenda>  # reboot | reset_wifi | identify | diag | ping  
 smarthome ota <kind> <plik|url>   # zdalny OTA: plik .bin hostowany na Pi lub gotowy URL -> home/<kind>/update
 smarthome set <topic> <payload>   # surowa publikacja (np. home/access/door/set OPEN)
 smarthome watch [topic]       # podgląd ruchu MQTT (domyślnie home/#)
-smarthome wifi <...>          # sieć Wi-Fi serwera: status|list|connect|forget|portal|migrate-nm (offline)
+smarthome wifi <...>          # sieć: status|list|connect|forget|portal|scan|switch-all|migrate-nm
+smarthome wifi switch-all "<SSID>" "<HASLO>"   # przepina CAŁĄ makietę (ESP-ki + RPi) na nową sieć
 smarthome logs <usługa>       # monitor | wifi | lcd | health | broker
 smarthome broker <up|down|restart|logs>
 smarthome update              # git pull + ponowny setup
 smarthome tailscale status    # przekazanie do tailscale
+smarthome tailscale-reauth    # przełącz na osobny tailnet projektowy (TAILSCALE_AUTHKEY)
 ```
 
 `kind` = `security` | `access` | `environment` | `system`.

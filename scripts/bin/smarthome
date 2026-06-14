@@ -49,6 +49,7 @@ smarthome – zarzadzanie serwerem Smart Home i wezlami ESP
   smarthome broker <up|down|restart|logs>   Sterowanie kontenerem brokera
   smarthome update                 git pull + ponowny setup (aktualizacja serwera)
   smarthome tailscale [args...]    Przekazuje do 'tailscale' (np. 'smarthome tailscale status')
+  smarthome tailscale-reauth       Przelacz na konto z TAILSCALE_AUTHKEY (osobny tailnet projektowy)
 
   kind = security | access | environment | system
 EOF
@@ -361,8 +362,39 @@ NPEOF
       esac
       _wifi_write_status
       ;;
+    switch-all)
+      # Przepina CALA makiete na nowa siec: najpierw rozsyla set_wifi do wszystkich
+      # wezlow ESP (musza byc ONLINE), potem przelacza sam RPi. Wymaga firmware z
+      # obsluga set_wifi i Wi-Fi pod NetworkManagerem.
+      _wifi_need_root
+      local nssid="${1:-}" npass="${2:-}"
+      [ -z "$nssid" ] && die "Uzycie: sudo smarthome wifi switch-all <SSID> <HASLO>"
+      case "$nssid$npass" in
+        *'"'*|*'\'*) die "SSID/haslo nie moga zawierac znakow \" ani \\ (psuja JSON komendy).";;
+      esac
+      warn "Przepinam CALA makiete na siec '$nssid' (ESP-ki + RPi)."
+      warn "Rob to PRZEZ TAILSCALE – przelaczenie RPi zerwie biezaca siec lokalna."
+      local payload kinds kk
+      payload="$(printf '{"cmd":"set_wifi","ssid":"%s","pass":"%s"}' "$nssid" "$npass")"
+      IFS=',' read -ra kinds <<< "${EXPECTED_KINDS:-security,access,environment}"
+      log "Rozsylam set_wifi do wezlow ESP (musza byc teraz online)..."
+      for kk in "${kinds[@]}"; do
+        kk="$(printf '%s' "$kk" | xargs)"
+        [ -z "$kk" ] && continue
+        log "  -> home/$kk/cmd"
+        mq_pub -t "home/$kk/cmd" -m "$payload"
+      done
+      log "Czekam 6 s, az ESP-ki odbiora komende i zaczna restart na nowa siec..."
+      sleep 6
+      log "Przelaczam RPi na '$nssid'..."
+      if nmcli device wifi connect "$nssid" password "$npass"; then
+        ok "RPi przelaczony. Po ~1-2 min: 'smarthome nodes' (ESP-ki powinny wrocic na nowej sieci)."
+      else
+        warn "Przelaczenie RPi nieudane (sprawdz 'smarthome wifi status'). ESP-ki juz dostaly nowe dane."
+      fi
+      ;;
     *)
-      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]|scan|migrate-nm <ssid> <haslo>>"
+      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]|scan|switch-all <ssid> <haslo>|migrate-nm <ssid> <haslo>>"
       ;;
   esac
 }
@@ -405,6 +437,29 @@ cmd_update() {
   [ "$ok" = "1" ] && ok "Aktualizacja zakonczona." || die "Aktualizacja zakonczona z bledami (patrz wyzej)."
 }
 
+# Przepina Tailscale na konto/tailnet z TAILSCALE_AUTHKEY (np. dedykowane konto
+# projektowe, niezalezne od osobistego). Wymaga 'logout' – sam nowy auth-key nie
+# przeniesie wezla. UWAGA: zrywa polaczenie przez Tailscale, rob to przez LAN/konsole.
+cmd_tailscale_reauth() {
+  [ "$(id -u)" -eq 0 ] || die "Wymaga sudo: sudo smarthome tailscale-reauth"
+  have tailscale || die "Brak tailscale (najpierw 'sudo smarthome update')."
+  [ -n "${TAILSCALE_AUTHKEY:-}" ] || die "Ustaw TAILSCALE_AUTHKEY (konto projektowe) w $CONFIG_FILE i ponow."
+  warn "Przelaczam Tailscale na konto z TAILSCALE_AUTHKEY."
+  warn "Jesli laczysz sie PRZEZ Tailscale (100.x) – ta operacja Cie ODETNIE. Rob przez LAN/konsole."
+  local up_args=(--hostname "${HOSTNAME:-rpi-smarthome}")
+  [ "${TAILSCALE_SSH:-1}" = "1" ] && up_args+=(--ssh)
+  [ -n "${TAILSCALE_TAGS:-}" ] && up_args+=(--advertise-tags="$TAILSCALE_TAGS")
+  log "Wylogowuje z biezacego tailnetu..."
+  tailscale logout 2>/dev/null || true
+  sleep 2
+  log "Loguje na nowe konto (auth-key)..."
+  if tailscale up --authkey "$TAILSCALE_AUTHKEY" "${up_args[@]}"; then
+    ok "Tailscale na nowym koncie: $(tailscale ip -4 2>/dev/null | head -n1)"
+  else
+    die "Re-auth nieudany – sprawdz auth-key (reusable? nie wygasl? device approval?)."
+  fi
+}
+
 main() {
   local sub="${1:-}"; shift || true
   case "$sub" in
@@ -419,6 +474,7 @@ main() {
     broker)    cmd_broker "$@" ;;
     update)    cmd_update "$@" ;;
     tailscale) tailscale "$@" ;;
+    tailscale-reauth) cmd_tailscale_reauth "$@" ;;
     ""|-h|--help|help) usage ;;
     *)         err "Nieznana komenda: $sub"; echo; usage; exit 1 ;;
   esac

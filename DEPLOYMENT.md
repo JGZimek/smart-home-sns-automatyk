@@ -95,11 +95,39 @@ tailscale serve status              # pokaze URL
 # wylaczenie: sudo tailscale serve --https=443 off
 ```
 
+### Niezależne konto Tailscale (osobny tailnet projektowy)
+Domyślnie Pi loguje się do **Twojego osobistego** tailnetu. Żeby makieta była niezależna od Twojego konta
+(np. przekazujesz ją dalej, albo dostęp ma mieć kilka osób), zepnij ją z **osobnym, „projektowym" kontem**:
+
+1. Załóż **oddzielne konto Tailscale** tylko dla makiety (np. na e-mail projektowy). Darmowy plan wystarcza.
+2. W jego panelu → **Settings → Keys → Generate auth key**: zaznacz **Reusable** (wielokrotny), w razie potrzeby
+   **Pre-approved** (jeśli masz device approval) i tag `tag:smarthome` (wymaga wpisu w `tagOwners` w ACL).
+3. Wklej klucz do `TAILSCALE_AUTHKEY` w `/etc/smarthome/smarthome.env`.
+4. Przełącz Pi na nowe konto (przez **LAN/konsolę** — zerwie obecne połączenie Tailscale):
+   ```bash
+   sudo smarthome tailscale-reauth
+   ```
+   (robi `tailscale logout` + `up` nowym kluczem; sam podmieniony klucz **nie** przeniesie węzła).
+5. Dostęp dla innych: w panelu projektowego tailnetu **Users → Invite**, albo udostępnij węzeł (**Share**).
+   Każdy z dostępem łączy się przez ten sam adres `100.x` / MagicDNS — bez Twojego prywatnego konta.
+
+> Świeża instalacja od zera od razu użyje konta projektowego — wystarczy mieć `TAILSCALE_AUTHKEY` z jego klucza
+> w configu przed `setup.sh`. `tailscale-reauth` jest do **przełączenia już działającego** Pi.
+
 ---
 
 ## 3. Przekonfigurowanie na inną sieć Wi-Fi
 
 Makietę przewozisz w inne miejsce / zmieniasz router. Trzeba ustawić **i Pi, i ESP-ki** na nową sieć.
+
+### 3.0. Najprościej: całość jednym poleceniem (`switch-all`)
+Gdy ESP-ki są **online** i firmware obsługuje `set_wifi`, przepnij **wszystko naraz** (uruchom przez Tailscale):
+```bash
+sudo smarthome wifi switch-all "<NOWY_SSID>" "<HASLO>"
+```
+Rozsyła nowe dane do wszystkich węzłów ESP, czeka aż się zrestartują na nową sieć, po czym przełącza sam RPi.
+Po ~1–2 min `smarthome nodes` powinno pokazać 3/3. Węzeł offline w chwili wysyłki trzeba dostroić osobno
+(BLE / §3.2). Ręczne kroki poniżej zostają jako rozbicie tego procesu / awaryjność.
 
 ### 3.1. Raspberry Pi → nowa sieć
 

@@ -1,6 +1,7 @@
 #include "device_core.h"
 #include "module_config.h"
 #include "mqtt_core.h"
+#include "network_core.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,7 @@
 #include "esp_idf_version.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include "cJSON.h"
 
 static const char* TAG_DEV = "DEVICE";
 
@@ -102,6 +104,28 @@ bool device_handle_command(const char* data, int data_len) {
         esp_wifi_restore();   // kasuje zapisaną sieć Wi-Fi z NVS
         esp_restart();
         return true;          // nieosiągalne
+    }
+    // set_wifi: zdalne przepiecie na nowa siec. Format: {"cmd":"set_wifi","ssid":"...","pass":"..."}
+    // Sprawdzane PO reset_wifi (bo "reset_wifi" zawiera podciag "set_wifi").
+    if (strstr(data, "set_wifi") != NULL) {
+        cJSON *root = cJSON_Parse(data);
+        if (root != NULL) {
+            const cJSON *ssid = cJSON_GetObjectItem(root, "ssid");
+            const cJSON *pass = cJSON_GetObjectItem(root, "pass");
+            if (cJSON_IsString(ssid) && ssid->valuestring != NULL) {
+                const char *p = (cJSON_IsString(pass) && pass->valuestring) ? pass->valuestring : "";
+                ESP_LOGW(TAG_DEV, "Komenda: set_wifi -> nowa siec SSID '%s', restart...", ssid->valuestring);
+                mqtt_publish(DIAG_TOPIC, "{\"ack\":\"set_wifi\"}", 1, 0);
+                wifi_set_credentials(ssid->valuestring, p);  // zapis do NVS
+                cJSON_Delete(root);
+                vTaskDelay(pdMS_TO_TICKS(500));
+                esp_restart();                                // czyste przejscie na nowa siec
+                return true;                                  // nieosiagalne
+            }
+            cJSON_Delete(root);
+        }
+        ESP_LOGW(TAG_DEV, "set_wifi: oczekiwany JSON {\"cmd\":\"set_wifi\",\"ssid\":\"...\",\"pass\":\"...\"}");
+        return false;
     }
     if (strstr(data, "reboot") != NULL) {
         ESP_LOGW(TAG_DEV, "Komenda: reboot");

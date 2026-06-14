@@ -45,11 +45,17 @@ Implementacja: `src/device_core.cpp`, `src/mqtt_core.cpp`.
 | Komenda | Efekt |
 | :------ | :---- |
 | `reboot` | Restart węzła. |
-| `reset_wifi` | Kasuje zapisaną sieć Wi-Fi i restartuje do BLE provisioningu (zdalna zmiana sieci). |
+| `reset_wifi` | Kasuje zapisaną sieć Wi-Fi i restartuje do BLE provisioningu (rekonfiguracja telefonem). |
+| `set_wifi` | Zapisuje **nowe** dane Wi-Fi i restartuje na nową sieć — bez telefonu. JSON: `{"cmd":"set_wifi","ssid":"...","pass":"..."}`. |
 | `identify` | Ponownie publikuje `info`. |
 | `diag` / `ping` | Natychmiast publikuje `diag`. |
 
 Pola `diag`: `uptime_s` (sekundy), `heap`/`min_heap` (bajty wolnej pamięci, bieżąco i minimum), `rssi` (dBm), `reset` (`poweron`/`sw`/`panic`/`brownout`/`task_wdt`/...).
+
+**Przepięcie całej makiety na nową sieć** — z serwera RPi jednym poleceniem:
+`sudo smarthome wifi switch-all "<SSID>" "<HASLO>"`. Rozsyła `set_wifi` do wszystkich węzłów
+(muszą być online), a po chwili przełącza sam RPi. Kolejność ma znaczenie: węzły muszą być
+osiągalne w obecnej sieci w chwili wysyłki. Kto był offline — wróci do BLE po zaniku starej sieci.
 
 ---
 
@@ -103,7 +109,7 @@ Stacja pogodowa, pomiar zasilania, wentylacja. Kod: `src/environment_system.cpp`
 | `home/garden/power/battery/current` | ❌ | `{"value":0.0500,"ts":...}` | A |
 | `home/garden/power/battery/power` | ❌ | `{"value":0.1950,"ts":...}` | W |
 
-> **`ts`** to znacznik czasu epoch z zegara ESP32. Obecnie **niewiarygodny** (brak synchronizacji NTP w firmware) — backend powinien stemplować czas własnym zegarem przy odbiorze. (Patrz „Znane ograniczenia" w `CLAUDE.md`.)
+> **`ts`** to znacznik czasu epoch z zegara ESP32. Obecnie **niewiarygodny** (brak synchronizacji NTP w firmware) — backend powinien stemplować czas własnym zegarem przy odbiorze.
 
 ---
 
@@ -181,7 +187,7 @@ mosquitto_pub -h rpi-smarthome.local -u smarthome -P smarthome -t home/security/
 home/<rodzaj>/info            pub  retained   JSON tożsamości
 home/<rodzaj>/availability    pub  retained   ONLINE | OFFLINE
 home/<rodzaj>/diag            pub             JSON zdrowia (~30 s)
-home/<rodzaj>/cmd             sub             reboot | reset_wifi | identify | diag
+home/<rodzaj>/cmd             sub             reboot | reset_wifi | set_wifi{ssid,pass} | identify | diag
 home/<rodzaj>/update          sub             URL firmware (OTA)
 
 # SECURITY
