@@ -102,10 +102,30 @@ tailscale serve status              # pokaze URL
 Makietę przewozisz w inne miejsce / zmieniasz router. Trzeba ustawić **i Pi, i ESP-ki** na nową sieć.
 
 ### 3.1. Raspberry Pi → nowa sieć
-- **Ubuntu domyślnie (networkd/netplan):** edytuj `/etc/netplan/50-cloud-init.yaml` (sekcja `wifis: wlan0:` →
-  nowy SSID/hasło), potem `sudo netplan apply`. Najlepiej z konsoli/HDMI lub przez Tailscale (link `100.x`
-  przeżyje zmianę sieci, o ile nowa sieć ma internet).
-- **Jeśli zmigrowałeś Wi-Fi do NetworkManagera** (dla AP fallback): `sudo nmcli dev wifi connect "<SSID>" password "<HASLO>"`.
+
+Najprościej poleceniem **`smarthome wifi`** (działa lokalnie, **bez internetu** — z konsoli/HDMI lub SSH po LAN/Tailscale):
+
+```bash
+smarthome wifi                              # status: aktywna siec, IP, zapisane sieci
+smarthome wifi list                         # skan sieci w zasiegu
+sudo smarthome wifi connect "<SSID>" "<HASLO>"   # przepiecie na nowa siec
+sudo smarthome wifi forget "<SSID>"         # usuniecie zapisanej sieci
+```
+
+**Nie masz dostępu do Pi (brak konsoli/SSH) i brak internetu?** Wymuś portal konfiguracyjny z telefonu:
+
+```bash
+sudo smarthome wifi portal                  # podnosi AP 'SmartHome-Config' na zadanie
+#  -> polacz telefon z AP, otworz http://10.42.0.1, podaj nowa siec
+sudo smarthome wifi portal off              # anuluj (powrot do zapisanej sieci)
+```
+
+Portal na żądanie działa nawet, gdy Pi jest jeszcze połączone ze starą siecią — w odróżnieniu od
+automatycznego AP fallback (usługa `smarthome-wifi-fallback`), który podnosi się dopiero po **utracie**
+łączności. Oba wymagają, by Wi-Fi było zarządzane przez NetworkManager (etap migracji w [scripts/README.md](scripts/README.md)).
+
+- Alternatywnie ręcznie: `sudo nmcli dev wifi connect "<SSID>" password "<HASLO>"`, albo (Ubuntu pod networkd)
+  edycja `/etc/netplan/50-cloud-init.yaml` + `sudo netplan apply`.
 - Tailscale i konto brokera nie wymagają zmian. mDNS (`rpi-smarthome.local`) działa dalej po połączeniu.
 
 ### 3.2. ESP-ki → nowa sieć

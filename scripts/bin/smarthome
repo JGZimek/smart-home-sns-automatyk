@@ -44,6 +44,7 @@ smarthome – zarzadzanie serwerem Smart Home i wezlami ESP
   smarthome ota <kind> <plik|url>  Zdalny OTA: plik .bin (hostowany na Pi) lub gotowy URL
   smarthome set <topic> <payload>  Surowa publikacja MQTT (np. sterowanie aktuatorem)
   smarthome watch [topic]          Podglad ruchu MQTT (domyslnie home/#)
+  smarthome wifi <...>             Siec Wi-Fi serwera (status|list|connect|forget|portal) – dziala offline
   smarthome logs [usluga]          Logi: monitor|wifi|lcd|health|broker (domyslnie monitor)
   smarthome broker <up|down|restart|logs>   Sterowanie kontenerem brokera
   smarthome update                 git pull + ponowny setup (aktualizacja serwera)
@@ -181,6 +182,73 @@ cmd_broker() {
   esac
 }
 
+# ==========================================================
+# Wi-Fi serwera – rekonfiguracja/przepiecie sieci, dziala lokalnie (bez internetu).
+# Operacje zmieniajace siec wymagaja root (nmcli). 'portal' wymusza AP konfiguracyjny
+# na zadanie, nawet gdy serwer jest jeszcze polaczony (wspolpracuje z usluga
+# smarthome-wifi-fallback przez plik-wyzwalacz $STATE_DIR/force_portal).
+# ==========================================================
+FORCE_PORTAL_FILE="$STATE_DIR/force_portal"
+
+_wifi_need_root() { [ "$(id -u)" -eq 0 ] || die "Ta operacja zmienia siec i wymaga root: poprzedz poleceniem 'sudo'."; }
+
+cmd_wifi() {
+  have nmcli || die "Brak nmcli (NetworkManager nie zarzadza siecia). Patrz setup.d/20-hostname-mdns.sh."
+  local action="${1:-status}"; shift || true
+  case "$action" in
+    status|"")
+      printf '%s== Wi-Fi serwera ==%s\n' "$C_BOLD" "$C_RESET"
+      { nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null || true; } | \
+        awk -F: '$2=="wifi"||$2=="ethernet"{printf "  %-8s %-9s %-13s %s\n",$1,$2,$3,$4}'
+      printf 'IP lokalne      : %s\n' "$(hostname -I 2>/dev/null | xargs)"
+      printf 'Zapisane sieci  :\n'
+      { nmcli -t -f NAME,TYPE connection show 2>/dev/null || true; } | awk -F: '$2 ~ /wireless/{print "  - "$1}'
+      [ -e "$FORCE_PORTAL_FILE" ] && warn "Wymuszony portal jest AKTYWNY (wylacz: sudo smarthome wifi portal off)."
+      ;;
+    list|scan)
+      nmcli device wifi rescan 2>/dev/null || true
+      nmcli -f IN-USE,SSID,SIGNAL,SECURITY device wifi list
+      ;;
+    connect)
+      local ssid="${1:-}" pass="${2:-}"
+      [ -z "$ssid" ] && die "Uzycie: sudo smarthome wifi connect <ssid> [haslo]"
+      _wifi_need_root
+      warn "Przelaczam serwer na siec '$ssid'. Jesli laczysz sie po SSH przez te Wi-Fi, sesja moze zerwac."
+      if [ -n "$pass" ]; then
+        nmcli device wifi connect "$ssid" password "$pass"
+      else
+        nmcli device wifi connect "$ssid"
+      fi
+      rm -f "$FORCE_PORTAL_FILE" 2>/dev/null || true
+      ok "Zlecono polaczenie z '$ssid'. Sprawdz: smarthome wifi status"
+      ;;
+    forget)
+      local ssid="${1:-}"
+      [ -z "$ssid" ] && die "Uzycie: sudo smarthome wifi forget <ssid>"
+      _wifi_need_root
+      nmcli connection delete "$ssid" && ok "Usunieto zapisana siec '$ssid'."
+      ;;
+    portal)
+      _wifi_need_root
+      if [ "${1:-}" = "off" ]; then
+        rm -f "$FORCE_PORTAL_FILE" 2>/dev/null || true
+        # Zdejmij AP, by NetworkManager wrocil do zapisanej sieci (autoconnect).
+        nmcli connection down "${AP_SSID:-SmartHome-Config}" 2>/dev/null || true
+        nmcli connection delete "${AP_SSID:-SmartHome-Config}" 2>/dev/null || true
+        ok "Wymuszony portal wylaczony – serwer wraca do zapisanej sieci."
+      else
+        mkdir -p "$STATE_DIR" 2>/dev/null || true
+        : > "$FORCE_PORTAL_FILE"
+        ok "Wymuszam portal Wi-Fi. Za chwile pojawi sie AP '${AP_SSID:-SmartHome-Config}'."
+        log "Polacz telefon z tym AP i otworz http://10.42.0.1  (wylacz: sudo smarthome wifi portal off)"
+      fi
+      ;;
+    *)
+      die "Uzycie: smarthome wifi <status|list|connect <ssid> [haslo]|forget <ssid>|portal [off]>"
+      ;;
+  esac
+}
+
 cmd_update() {
   [ "$(id -u)" -eq 0 ] || die "Aktualizacja wymaga sudo: sudo smarthome update"
   log "Aktualizuje repo ($REPO_DIR)..."
@@ -198,6 +266,7 @@ main() {
     ota)       cmd_ota "$@" ;;
     set)       cmd_set "$@" ;;
     watch)     cmd_watch "$@" ;;
+    wifi)      cmd_wifi "$@" ;;
     logs)      cmd_logs "$@" ;;
     broker)    cmd_broker "$@" ;;
     update)    cmd_update "$@" ;;

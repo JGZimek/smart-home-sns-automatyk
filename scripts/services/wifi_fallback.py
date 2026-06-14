@@ -29,6 +29,10 @@ AP_PASS = os.environ.get("AP_PASS", "").strip()
 GRACE_S = int(os.environ.get("AP_GRACE_S", "90"))
 CHECK_INTERVAL_S = 15
 PORT = 80
+# Plik-wyzwalacz: gdy istnieje, portal AP jest wymuszony na zadanie (nawet gdy Pi
+# jest jeszcze polaczone) – pozwala przepiac siec bez czekania na utrate polaczenia.
+# Tworzy/usuwa go: `sudo smarthome wifi portal [off]`.
+FORCE_PORTAL_FILE = os.environ.get("FORCE_PORTAL_FILE", "/var/lib/smarthome/force_portal")
 
 app = Flask(__name__)
 _ap_active = threading.Event()
@@ -122,6 +126,11 @@ def connect_wifi(ssid, password):
     r = nmcli(*args)
     if r.returncode == 0:
         log("Polaczono z '%s'." % ssid)
+        # Udana zmiana sieci kasuje ewentualny wymuszony portal.
+        try:
+            os.remove(FORCE_PORTAL_FILE)
+        except OSError:
+            pass
         return True
     log("Polaczenie nieudane: %s" % r.stderr.strip())
     return False
@@ -199,6 +208,15 @@ def main():
     down_since = None
     while True:
         if not nm_manages_wifi():
+            time.sleep(CHECK_INTERVAL_S)
+            continue
+        # Portal na zadanie: trzymaj AP niezaleznie od stanu polaczenia, dopoki
+        # wyzwalacz istnieje (uzytkownik chce przepiac siec z telefonu).
+        if os.path.exists(FORCE_PORTAL_FILE):
+            down_since = None
+            if not _ap_active.is_set():
+                log("Wymuszono portal na zadanie (%s) – podnosze AP." % FORCE_PORTAL_FILE)
+                start_ap()
             time.sleep(CHECK_INTERVAL_S)
             continue
         if has_connectivity():
