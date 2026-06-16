@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import gateIcon from "../assets/gate.png";
 import { useEffect, useState } from "react";
+import { apiClient } from "../api/client";
 
 interface Gate {
   isOpened: boolean;
@@ -35,30 +36,20 @@ export const GateCard = () => {
   const [gate, setGate] = useState<Gate>();
 
   useEffect(() => {
-    fetch("http://localhost:3000/gate")
-      .then((res) => res.json())
-      .then((json) => {
-        setGate(json);
-      });
+    apiClient
+      .get<Gate>("/gate")
+      .then((response) => setGate(response.data));
   }, []);
 
   function setGateStatus() {
     if (!gate) return;
 
-    fetch("http://localhost:3000/gate", {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    apiClient
+      .patch<Gate>("/gate", {
         ...gate,
         isOpened: !gate.isOpened,
-      }),
-    })
-      .then((res) => res.json())
-      .then((json) => {
-        setGate(json);
-      });
+      })
+      .then((response) => setGate(response.data));
   }
 
   return (

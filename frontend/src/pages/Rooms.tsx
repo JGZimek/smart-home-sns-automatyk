@@ -1,6 +1,7 @@
 import { Grid, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { RoomCard } from "../components/RoomCard";
+import { apiClient } from "../api/client";
 
 export interface Room {
   id: string;
@@ -19,11 +20,9 @@ export const Rooms = () => {
   const [rooms, setRooms] = useState<Room[]>([]);
 
   useEffect(() => {
-    fetch("http://localhost:3000/rooms")
-      .then((res) => res.json())
-      .then((json) => {
-        setRooms(json);
-      });
+     apiClient
+              .get<Room[]>(`/rooms`)
+              .then((response) => setRooms(response.data));
   }, []);
 
   return (

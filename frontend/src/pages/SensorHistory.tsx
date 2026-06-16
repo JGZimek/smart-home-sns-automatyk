@@ -5,6 +5,7 @@ import { ScatterChart } from "@mui/x-charts/ScatterChart";
 import { BackButton } from "../components/BackButton";
 import { ROUTES } from "../Routes";
 import { type HistoryReading } from "../models/HistoryReading";
+import { apiClient } from "../api/client";
 
 function SensorHistoryChart({ id }: { id: string }) {
   const [history, setHistory] = useState<HistoryReading | null>(null);
@@ -14,16 +15,11 @@ function SensorHistoryChart({ id }: { id: string }) {
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`http://localhost:3000/history-readings/${id}`)
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`Failed to load history (HTTP ${res.status})`);
-        }
-        return res.json();
-      })
-      .then((json: HistoryReading) => {
+    apiClient
+      .get<HistoryReading>(`/history-readings/${id}`)
+      .then((response) => {
         if (!cancelled) {
-          setHistory(json);
+          setHistory(response.data);
         }
       })
       .catch((err: Error) => {

@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import { type SensorData } from "../models/SensorData";
 import SensorCard from "../components/SensorCard";
+import { apiClient } from "../api/client";
 
 export default function Sensors() {
   const [sensors, setSensor] = useState<SensorData[]>([]);
 
   useEffect(() => {
-    fetch("http://localhost:3000/readings")
-      .then((res) => res.json())
-      .then((json) => {
-        setSensor(json);
-      });
+         apiClient
+                  .get<SensorData[]>(`/readings`)
+                  .then((response) => setSensor(response.data));
+
   }, []);
 
   return (

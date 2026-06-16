@@ -14,6 +14,7 @@ import styled from "@emotion/styled";
 import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../Routes";
 import { SwitchRoomCard } from "./SwitchRoomCard";
+import { apiClient } from "../api/client";
 
 interface RoomProps {
   room: Room;
@@ -30,11 +31,9 @@ export const RoomCard: React.FC<RoomProps> = ({ room }) => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch(`http://localhost:3000/readings?room=${room.id}`)
-      .then((res) => res.json())
-      .then((json) => {
-        setSensors(json);
-      });
+        apiClient
+          .get<SensorData[]>(`/readings?room=${room.id}`)
+          .then((response) => setSensors(response.data));
   }, [room.id]);
 
   const handleToggle = (deviceType: "lights" | "fan", deviceId: number) => {
@@ -53,19 +52,12 @@ export const RoomCard: React.FC<RoomProps> = ({ room }) => {
 
     setLocalRoom(updatedRoom);
 
-    fetch(`http://localhost:3000/rooms/${localRoom.id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        // Wysyłamy zaktualizowaną tablicę zależącą od tego, co kliknęliśmy
+    apiClient
+      .patch(`/rooms/${localRoom.id}`, {
         [deviceType]: updatedRoom[deviceType],
-      }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("Zaktualizowano w bazie:", data);
+      })
+      .then((response) => {
+        console.log("Zaktualizowano w bazie:", response.data);
       })
       .catch((err) => {
         console.error("Error updating database", err);
