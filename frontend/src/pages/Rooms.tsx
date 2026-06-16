@@ -1,7 +1,6 @@
 import { Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { RoomCard } from "../components/RoomCard";
-import { BackButton } from "../components/BackButton";
 
 export interface Room {
   id: string;
@@ -29,7 +28,6 @@ export const Rooms = () => {
 
   return (
     <>
-      <BackButton destination="/" />
       {rooms ? (
         rooms.map((room) => <RoomCard key={room.id} room={room} />)
       ) : (

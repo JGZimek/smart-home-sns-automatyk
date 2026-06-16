@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { type SensorData } from "../models/SensorData";
 import SensorCard from "../components/SensorCard";
-import { BackButton } from "../components/BackButton";
 
 export default function Sensors() {
   const [sensors, setSensor] = useState<SensorData[]>([]);
-  // const [hasError, setHasError] = useState(false)
 
   useEffect(() => {
     fetch("http://localhost:3000/readings")
@@ -17,7 +15,6 @@ export default function Sensors() {
 
   return (
     <>
-      <BackButton destination="/" />
       {sensors.map((sensor) => (
         <SensorCard key={sensor.id} sensor={sensor}></SensorCard>
       ))}

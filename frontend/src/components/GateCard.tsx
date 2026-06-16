@@ -61,7 +61,7 @@ export const GateCard = () => {
         <>
           <CardContent>
             <Typography>
-              Gate status: {gate.isOpened ? "opened" : "closed"}{" "}
+              Gate: {gate.isOpened ? "opened" : "closed"}{" "}
             </Typography>
           </CardContent>
           <Button onClick={setGateStatus}>
