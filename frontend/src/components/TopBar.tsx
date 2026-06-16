@@ -1,10 +1,4 @@
-import {
-  AppBar,
-  Box,
-  styled,
-  Toolbar,
-  Typography,
-} from "@mui/material";
+import { AppBar, Box, styled, Toolbar, Typography } from "@mui/material";
 import logo from "../assets/logo1.png";
 
 const StyledAppBar = styled(AppBar)(({ theme }) => ({

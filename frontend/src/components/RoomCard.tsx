@@ -31,9 +31,9 @@ export const RoomCard: React.FC<RoomProps> = ({ room }) => {
   const navigate = useNavigate();
 
   useEffect(() => {
-        apiClient
-          .get<SensorData[]>(`/readings?room=${room.id}`)
-          .then((response) => setSensors(response.data));
+    apiClient
+      .get<SensorData[]>(`/readings?room=${room.id}`)
+      .then((response) => setSensors(response.data));
   }, [room.id]);
 
   const handleToggle = (deviceType: "lights" | "fan", deviceId: number) => {

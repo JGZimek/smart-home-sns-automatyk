@@ -36,9 +36,7 @@ export const GateCard = () => {
   const [gate, setGate] = useState<Gate>();
 
   useEffect(() => {
-    apiClient
-      .get<Gate>("/gate")
-      .then((response) => setGate(response.data));
+    apiClient.get<Gate>("/gate").then((response) => setGate(response.data));
   }, []);
 
   function setGateStatus() {
@@ -88,7 +86,9 @@ export const GateCard = () => {
               <Typography variant="h3" component="h2">
                 Gate
               </Typography>
-              <Typography color="text.secondary">Error fetching gate data</Typography>
+              <Typography color="text.secondary">
+                Error fetching gate data
+              </Typography>
             </CardContent>
           </Box>
           <CardActions sx={{ p: 0 }}>

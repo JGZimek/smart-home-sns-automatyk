@@ -20,9 +20,7 @@ export const Rooms = () => {
   const [rooms, setRooms] = useState<Room[]>([]);
 
   useEffect(() => {
-     apiClient
-              .get<Room[]>(`/rooms`)
-              .then((response) => setRooms(response.data));
+    apiClient.get<Room[]>(`/rooms`).then((response) => setRooms(response.data));
   }, []);
 
   return (
@@ -31,7 +29,7 @@ export const Rooms = () => {
       {rooms ? (
         <Grid container spacing={2}>
           {rooms.map((room) => (
-            <Grid key={room.id} size={{ xs: 12, sm: 6, xl: 4}}>
+            <Grid key={room.id} size={{ xs: 12, sm: 6, xl: 4 }}>
               <RoomCard room={room} />
             </Grid>
           ))}
