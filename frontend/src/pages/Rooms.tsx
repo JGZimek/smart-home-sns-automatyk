@@ -9,7 +9,7 @@ export interface Room {
   fan?: Controllable[];
 }
 
-interface Controllable {
+export interface Controllable {
   id: number;
   name: string;
   isOn: boolean;

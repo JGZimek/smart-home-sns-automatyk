@@ -4,11 +4,7 @@ import {
   CardActions,
   CardContent,
   CardHeader,
-  FormControlLabel,
-  FormGroup,
-  FormLabel,
   Link,
-  Switch,
   Typography,
 } from "@mui/material";
 import type { Room } from "../pages/Rooms";
@@ -17,6 +13,7 @@ import { useEffect, useState } from "react";
 import styled from "@emotion/styled";
 import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../Routes";
+import { SwitchRoomCard } from "./SwitchRoomCard";
 
 interface RoomProps {
   room: Room;
@@ -114,55 +111,21 @@ export const RoomCard: React.FC<RoomProps> = ({ room }) => {
 
         <CardActions sx={{ alignItems: "flex-start", gap: 3, pr: 2, pt: 1 }}>
           {localRoom?.lights ? (
-            <Box
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-              }}
-            >
-              <FormLabel component="legend">Lights</FormLabel>
-              <FormGroup>
-                {localRoom.lights.map((light) => (
-                  <FormControlLabel
-                    key={light.id}
-                    control={
-                      <Switch
-                        checked={light.isOn}
-                        onChange={() => handleToggle("lights", light.id)}
-                      />
-                    }
-                    label={light.name}
-                  />
-                ))}
-              </FormGroup>
-            </Box>
+            <SwitchRoomCard
+              title="Lights"
+              devices={localRoom.lights}
+              deviceType="lights"
+              onToggle={handleToggle}
+            />
           ) : null}
 
           {localRoom?.fan ? (
-            <Box
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-              }}
-            >
-              <FormLabel component="legend">Fans</FormLabel>
-              <FormGroup>
-                {localRoom.fan.map((fan) => (
-                  <FormControlLabel
-                    key={fan.id}
-                    control={
-                      <Switch
-                        checked={fan.isOn}
-                        onChange={() => handleToggle("fan", fan.id)}
-                      />
-                    }
-                    label={fan.name}
-                  />
-                ))}
-              </FormGroup>
-            </Box>
+            <SwitchRoomCard
+              title="Fans"
+              devices={localRoom.fan}
+              deviceType="fan"
+              onToggle={handleToggle}
+            />
           ) : null}
         </CardActions>
       </Box>
