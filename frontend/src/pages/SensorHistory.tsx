@@ -78,7 +78,7 @@ function SensorHistoryChart({ id }: { id: string }) {
 
   return (
     <>
-      <BackButton destination={ROUTES.SENSORS} />
+      <BackButton destination={ROUTES.MAIN} />
       <Typography variant="h5" gutterBottom>
         {history.sensor_type} — {history.room}
       </Typography>
@@ -112,7 +112,7 @@ export default function SensorHistory() {
   if (!id) {
     return (
       <>
-        <BackButton destination={ROUTES.SENSORS} />
+        <BackButton destination={ROUTES.MAIN} />
         <Typography color="error">Missing sensor id.</Typography>
       </>
     );

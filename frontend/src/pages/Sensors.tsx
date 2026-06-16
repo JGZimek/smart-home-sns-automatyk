@@ -15,6 +15,7 @@ export default function Sensors() {
 
   return (
     <>
+    <h1>Sensors info</h1>
       {sensors.map((sensor) => (
         <SensorCard key={sensor.id} sensor={sensor}></SensorCard>
       ))}

@@ -1,4 +1,5 @@
 import {
+  Box,
   Card,
   CardActions,
   CardContent,
@@ -6,6 +7,7 @@ import {
   FormControlLabel,
   FormGroup,
   FormLabel,
+  Link,
   Switch,
   Typography,
 } from "@mui/material";
@@ -13,6 +15,8 @@ import type { Room } from "../pages/Rooms";
 import type { SensorData } from "../models/SensorData";
 import { useEffect, useState } from "react";
 import styled from "@emotion/styled";
+import { useNavigate } from "react-router-dom";
+import { ROUTES } from "../Routes";
 
 interface RoomProps {
   room: Room;
@@ -20,11 +24,13 @@ interface RoomProps {
 
 const CardWrapper = styled(Card)({
   marginBottom: 1,
+  height: "100%",
 });
 
 export const RoomCard: React.FC<RoomProps> = ({ room }) => {
   const [sensors, setSensors] = useState<SensorData[]>([]);
   const [localRoom, setLocalRoom] = useState<Room>(room);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetch(`http://localhost:3000/readings?room=${room.id}`)
@@ -73,56 +79,93 @@ export const RoomCard: React.FC<RoomProps> = ({ room }) => {
   return (
     <CardWrapper>
       <CardHeader title={room.name} />
-      <CardContent>
-        {sensors
-          ? sensors.map((sensor) => (
-              <Typography key={sensor.id}>
-                {sensor.sensor_type}: {sensor.value + sensor.unit}
-              </Typography>
-            ))
-          : null}
-      </CardContent>
-      <CardActions>
-        {localRoom?.lights ? (
-          <>
-            <FormLabel component="legend">Lights</FormLabel>
-            <FormGroup>
-              {localRoom.lights.map((light) => (
-                <FormControlLabel
-                  key={light.id}
-                  control={
-                    <Switch
-                      checked={light.isOn}
-                      onChange={() => handleToggle("lights", light.id)}
-                    />
-                  }
-                  label={light.name}
-                />
-              ))}
-            </FormGroup>
-          </>
-        ) : null}
+      <Box
+        sx={{
+          display: "flex",
+          gap: 3,
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+        }}
+      >
+        <CardContent sx={{ flex: 1 }}>
+          {sensors
+            ? sensors.map((sensor) => (
+                <Typography key={sensor.id}>
+                  <Link
+                    component="button"
+                    underline="none"
+                    onClick={() => navigate(ROUTES.SENSOR_HISTORY(sensor.id))}
+                    sx={{
+                      color: "text.primary",
+                      fontWeight: 400,
+                      textAlign: "left",
+                      cursor: "pointer",
+                      "&:hover": {
+                        color: "text.secondary",
+                      },
+                    }}
+                  >
+                    {sensor.sensor_type}: {sensor.value + sensor.unit}
+                  </Link>
+                </Typography>
+              ))
+            : null}
+        </CardContent>
 
-        {localRoom?.fan ? (
-          <>
-            <FormLabel component="legend">Fans</FormLabel>
-            <FormGroup>
-              {localRoom.fan.map((fan) => (
-                <FormControlLabel
-                  key={fan.id}
-                  control={
-                    <Switch
-                      checked={fan.isOn}
-                      onChange={() => handleToggle("fan", fan.id)}
-                    />
-                  }
-                  label={fan.name}
-                />
-              ))}
-            </FormGroup>
-          </>
-        ) : null}
-      </CardActions>
+        <CardActions sx={{ alignItems: "flex-start", gap: 3, pr: 2, pt: 1 }}>
+          {localRoom?.lights ? (
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+              }}
+            >
+              <FormLabel component="legend">Lights</FormLabel>
+              <FormGroup>
+                {localRoom.lights.map((light) => (
+                  <FormControlLabel
+                    key={light.id}
+                    control={
+                      <Switch
+                        checked={light.isOn}
+                        onChange={() => handleToggle("lights", light.id)}
+                      />
+                    }
+                    label={light.name}
+                  />
+                ))}
+              </FormGroup>
+            </Box>
+          ) : null}
+
+          {localRoom?.fan ? (
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+              }}
+            >
+              <FormLabel component="legend">Fans</FormLabel>
+              <FormGroup>
+                {localRoom.fan.map((fan) => (
+                  <FormControlLabel
+                    key={fan.id}
+                    control={
+                      <Switch
+                        checked={fan.isOn}
+                        onChange={() => handleToggle("fan", fan.id)}
+                      />
+                    }
+                    label={fan.name}
+                  />
+                ))}
+              </FormGroup>
+            </Box>
+          ) : null}
+        </CardActions>
+      </Box>
     </CardWrapper>
   );
 };

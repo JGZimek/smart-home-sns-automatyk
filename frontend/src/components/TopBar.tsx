@@ -1,42 +1,49 @@
-import { Box, AppBar, IconButton, Typography, Toolbar } from "@mui/material";
+import {
+  AppBar,
+  Box,
+  styled,
+  Toolbar,
+  Typography,
+} from "@mui/material";
 import logo from "../assets/logo1.png";
-import { useNavigate } from "react-router-dom";
-import styled from "@emotion/styled";
 
-const StyledAppBar = styled(AppBar)({
-  backgroundColor: "lightgray",
-  color: "black",
-});
+const StyledAppBar = styled(AppBar)(({ theme }) => ({
+  backgroundColor: theme.palette.background.paper,
+  color: theme.palette.text.primary,
+  borderBottom: `1px solid ${theme.palette.divider}`,
+  boxShadow: "none",
+}));
 
-const StyledToolbar = styled(Toolbar)({
+const StyledToolbar = styled(Toolbar)(({ theme }) => ({
   display: "flex",
-  gap: "15px",
-  padding: 0,
-});
+  gap: theme.spacing(2),
+  minHeight: 72,
+  padding: theme.spacing(0, 2),
+}));
 
 const TextWrapper = styled(Box)({
   display: "flex",
-  justifyContent: "center",
-  width: "100%",
+  alignItems: "center",
+  flexGrow: 1,
+  gap: 8,
 });
 
 export const TopBar = () => {
-  const navigate = useNavigate();
   return (
     <StyledAppBar position="sticky">
       <StyledToolbar>
-        <IconButton onClick={() => navigate("/")}>
-          <img
-            src={logo}
-            alt="Science club logo"
-            style={{
-              height: "30px",
-              width: "auto",
-            }}
-          />
-        </IconButton>
+        <img
+          src={logo}
+          alt="Science club logo"
+          style={{
+            height: "36px",
+            width: "auto",
+          }}
+        />
         <TextWrapper>
-          <Typography>Smart Home</Typography>
+          <Typography variant="h3" component="p" fontWeight={700}>
+            Smart Home
+          </Typography>
         </TextWrapper>
       </StyledToolbar>
     </StyledAppBar>

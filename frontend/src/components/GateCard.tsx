@@ -1,8 +1,11 @@
 import {
+  Box,
   Button,
   Card,
+  CardActions,
   CardContent,
   CardMedia,
+  Chip,
   styled,
   Typography,
 } from "@mui/material";
@@ -16,12 +19,16 @@ interface Gate {
 const CardWrapper = styled(Card)(() => ({
   display: "flex",
   alignItems: "center",
-  justifyContent: "center",
+  justifyContent: "space-between",
+  gap: 16,
+  padding: 16,
+  marginBottom: 16,
 }));
 
 const CardImageWrapper = styled(CardMedia)(() => ({
-  height: 30,
-  width: 30,
+  height: 56,
+  width: 56,
+  flexShrink: 0,
 }));
 
 export const GateCard = () => {
@@ -56,21 +63,49 @@ export const GateCard = () => {
 
   return (
     <CardWrapper>
-      <CardImageWrapper image={gateIcon} title={"Gate image"} />
       {gate ? (
         <>
-          <CardContent>
-            <Typography>
-              Gate: {gate.isOpened ? "opened" : "closed"}{" "}
-            </Typography>
-          </CardContent>
-          <Button onClick={setGateStatus}>
-            {" "}
-            {gate.isOpened ? "Close" : "Open"} gate{" "}
-          </Button>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <CardImageWrapper image={gateIcon} title="Gate image" />
+            <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
+              <Typography variant="h3" component="h2">
+                Gate
+              </Typography>
+              <Chip
+                color={gate.isOpened ? "success" : "default"}
+                label={gate.isOpened ? "Opened" : "Closed"}
+                size="small"
+                sx={{ mt: 1 }}
+              />
+            </CardContent>
+          </Box>
+          <CardActions sx={{ p: 0 }}>
+            <Button
+              onClick={setGateStatus}
+              variant="contained"
+              color={gate.isOpened ? "warning" : "primary"}
+            >
+              {gate.isOpened ? "Close gate" : "Open gate"}
+            </Button>
+          </CardActions>
         </>
       ) : (
-        <Typography>Error fetching gate data</Typography>
+        <>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <CardImageWrapper image={gateIcon} title="Gate image" />
+            <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
+              <Typography variant="h3" component="h2">
+                Gate
+              </Typography>
+              <Typography color="text.secondary">Error fetching gate data</Typography>
+            </CardContent>
+          </Box>
+          <CardActions sx={{ p: 0 }}>
+            <Button disabled variant="contained">
+              Unavailable
+            </Button>
+          </CardActions>
+        </>
       )}
     </CardWrapper>
   );

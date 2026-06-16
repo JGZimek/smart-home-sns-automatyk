@@ -1,4 +1,4 @@
-import { Typography } from "@mui/material";
+import { Grid, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { RoomCard } from "../components/RoomCard";
 
@@ -28,8 +28,15 @@ export const Rooms = () => {
 
   return (
     <>
+      <h1>Rooms control</h1>
       {rooms ? (
-        rooms.map((room) => <RoomCard key={room.id} room={room} />)
+        <Grid container spacing={2}>
+          {rooms.map((room) => (
+            <Grid key={room.id} size={{ xs: 12, sm: 6, xl: 4}}>
+              <RoomCard room={room} />
+            </Grid>
+          ))}
+        </Grid>
       ) : (
         <Typography> no rooms found </Typography>
       )}
